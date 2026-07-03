@@ -1,0 +1,67 @@
+service: jobnet-back
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: us-east-1
+  environment:
+    DYNAMODB_TABLE: jobnet-jobs-${self:provider.stage}
+    S3_UPLOAD_BUCKET: jobnet-uploads-${self:provider.stage}
+    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, 'us-east-1_local'}
+    OPENSEARCH_ENDPOINT: ${env:OPENSEARCH_ENDPOINT, 'localhost:9200'}
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+
+custom:
+  esbuild:
+    bundle: true
+    minify: false
+    sourcemap: true
+    exclude: []
+    target: node18
+    platform: node
+
+functions:
+  getJobs:
+    handler: src/handlers/jobs.getJobs
+    events:
+      - http:
+          path: jobs
+          method: get
+          cors: true
+          authorizer:
+            name: cognitoAuthorizer
+            arn: ${env:COGNITO_USER_POOL_ARN, 'arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_local'}
+  createJob:
+    handler: src/handlers/jobs.createJob
+    events:
+      - http:
+          path: jobs
+          method: post
+          cors: true
+          authorizer:
+            name: cognitoAuthorizer
+            arn: ${env:COGNITO_USER_POOL_ARN, 'arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_local'}
+  getUploadPresignedUrl:
+    handler: src/handlers/jobs.getUploadPresignedUrl
+    events:
+      - http:
+          path: uploads/presigned
+          method: get
+          cors: true
+          authorizer:
+            name: cognitoAuthorizer
+            arn: ${env:COGNITO_USER_POOL_ARN, 'arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_local'}
+  sendNotificationEmail:
+    handler: src/handlers/jobs.sendNotificationEmail
+    events:
+      - http:
+          path: notifications/email
+          method: post
+          cors: true
+          authorizer:
+            name: cognitoAuthorizer
+            arn: ${env:COGNITO_USER_POOL_ARN, 'arn:aws:cognito-idp:us-east-1:123456789012:userpool/us-east-1_local'}

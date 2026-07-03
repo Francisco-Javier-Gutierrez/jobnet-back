@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: jobnet-dynamodb-local
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb"
+
+  opensearch-node:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: jobnet-opensearch-local
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch-node
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: jobnet-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,ses
+      - DEFAULT_REGION=us-east-1

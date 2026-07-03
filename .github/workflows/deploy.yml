@@ -1,0 +1,55 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - deployment
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: |
+          cd terraform/environments/prod
+          terraform init
+
+      - name: Terraform Apply
+        run: |
+          cd terraform/environments/prod
+          terraform apply -auto-approve
+
+      - name: Deploy Serverless
+        run: |
+          COGNITO_USER_POOL_ARN="arn:aws:cognito-idp:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:userpool/$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
+          S3_UPLOAD_BUCKET="$(cd terraform/environments/prod && terraform output -raw s3_upload_bucket)"
+          COGNITO_USER_POOL_ID="$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
+          OPENSEARCH_ENDPOINT="$(cd terraform/environments/prod && terraform output -raw opensearch_endpoint)"
+          export COGNITO_USER_POOL_ARN
+          export S3_UPLOAD_BUCKET
+          export COGNITO_USER_POOL_ID
+          export OPENSEARCH_ENDPOINT
+          npx serverless deploy --stage prod
