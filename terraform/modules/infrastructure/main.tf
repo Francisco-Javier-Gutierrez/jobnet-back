@@ -1,8 +1,6 @@
 data "aws_caller_identity" "current" {}
 
-resource "aws_ses_email_identity" "email" {
-  email = "noreply@jobnet-platform.com"
-}
+
 
 resource "aws_cognito_user_pool" "pool" {
   name = "jobnet-user-pool-${var.environment}"
@@ -28,12 +26,31 @@ resource "aws_cognito_user_pool" "pool" {
     }
   }
 
+  schema {
+    attribute_data_type      = "String"
+    developer_only_attribute = false
+    mutable                  = true
+    name                     = "groups"
+    required                 = false
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+
+  mfa_configuration = "OPTIONAL"
+
+  software_token_mfa_configuration {
+    enabled = true
+  }
+
   auto_verified_attributes = ["email"]
 
   email_configuration {
     email_sending_account = "DEVELOPER"
-    from_email_address    = "noreply@jobnet-platform.com"
-    source_arn            = aws_ses_email_identity.email.arn
+    from_email_address    = "contacto@franciscojgh.com"
+    source_arn            = "arn:aws:ses:us-east-1:${data.aws_caller_identity.current.account_id}:identity/franciscojgh.com"
   }
 }
 

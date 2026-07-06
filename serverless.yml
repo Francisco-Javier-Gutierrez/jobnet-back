@@ -24,20 +24,53 @@ custom:
     target: node18
     platform: node
 
+  serverless-offline:
+    httpPort: 3001
+    websocketPort: 3002
+
 functions:
   getJobs:
     handler: src/handlers/jobs.getJobs
+    events:
+      - httpApi:
+          path: /jobs
+          method: get
   createJob:
     handler: src/handlers/jobs.createJob
+    events:
+      - httpApi:
+          path: /jobs
+          method: post
   getUploadPresignedUrl:
     handler: src/handlers/jobs.getUploadPresignedUrl
+    events:
+      - httpApi:
+          path: /upload-url
+          method: get
   sendNotificationEmail:
     handler: src/handlers/jobs.sendNotificationEmail
+    events:
+      - httpApi:
+          path: /notify
+          method: post
   wsAuthorizer:
     handler: src/handlers/wsAuthorizer.handler
   wsConnect:
     handler: src/handlers/wsHandlers.connect
+    events:
+      - websocket:
+          route: $connect
+          authorizer:
+            name: wsAuthorizer
+            identitySource:
+              - 'route.request.querystring.token'
   wsDisconnect:
     handler: src/handlers/wsHandlers.disconnect
+    events:
+      - websocket:
+          route: $disconnect
   wsDefault:
     handler: src/handlers/wsHandlers.defaultRoute
+    events:
+      - websocket:
+          route: $default
