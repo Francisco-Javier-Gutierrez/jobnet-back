@@ -13,6 +13,10 @@ Por favor, lee con detenimiento este documento antes de comenzar a programar.
 - **Ramas de trabajo**: Crea siempre ramas partiendo de `develop` con los prefijos:
   - `feature/nombre-de-la-feature`
   - `fix/nombre-del-error`
+- **Creación de Pull Requests (PR)**:
+  - **Los PRs se deben hacer siempre con destino a `develop` y nunca a `main`**.
+  - Si el dispositivo/entorno cuenta con la CLI de GitHub (`gh`), el desarrollador o agente debe crear el PR automáticamente usando `gh pr create` apuntando a `develop`.
+  - En caso de no contar con la CLI de GitHub (`gh`), el desarrollador o agente debe indicar siempre al usuario después de una implementación que debe realizar el PR de forma manual con destino a `develop` y **nunca a `main`**.
 
 ---
 
