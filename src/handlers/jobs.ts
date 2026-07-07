@@ -53,15 +53,34 @@ const bucketName = process.env.S3_UPLOAD_BUCKET || "jobnet-uploads-dev";
 export const getJobs: APIGatewayProxyHandler = async () => {
   try {
     const result = await docClient.send(
-      new ScanCommand({ TableName: tableName }),
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk AND begins_with(PK, :pkPrefix)",
+        ExpressionAttributeValues: {
+          ":sk": "METADATA",
+          ":pkPrefix": "VACANCY#",
+        },
+      }),
     );
+    const jobs = (result.Items || []).map((item) => ({
+      id: item.PK.replace("VACANCY#", ""),
+      title: item.titulo || item.title,
+      company: item.company || "Empresa",
+      lat: item.ubicacion?.lat || item.lat || 0,
+      lng: item.ubicacion?.lng || item.lng || 0,
+      modalidad: item.modalidad || "Presencial",
+      salario: item.salario || 0,
+      habilidadesRequeridas: item.habilidadesRequeridas || [],
+      descripcion: item.descripcion || "Sin descripción",
+      createdAt: item.fechaCreacion || item.createdAt,
+    }));
     return {
       statusCode: 200,
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
       },
-      body: JSON.stringify(result.Items || []),
+      body: JSON.stringify(jobs),
     };
   } catch (error: unknown) {
     return {
@@ -78,13 +97,25 @@ export const getJobs: APIGatewayProxyHandler = async () => {
 export const createJob: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
+    const vacancyUuid = Math.random().toString(36).substring(2);
     const item = {
-      id: Math.random().toString(36).substring(2),
-      title: body.title,
-      company: body.company,
-      lat: body.lat,
-      lng: body.lng,
-      createdAt: new Date().toISOString(),
+      PK: `VACANCY#${vacancyUuid}`,
+      SK: "METADATA",
+      empresaUuid: body.empresaUuid || "mock-empresa-uuid",
+      titulo: body.title,
+      company: body.company || "Empresa",
+      descripcion: body.description || "Sin descripción",
+      modalidad: body.modalidad || "Presencial",
+      salario: body.salario || 0,
+      habilidadesRequeridas: body.habilidadesRequeridas || [],
+      ubicacion: {
+        lat: body.lat || 0,
+        lng: body.lng || 0,
+      },
+      lat: body.lat || 0,
+      lng: body.lng || 0,
+      estado: "Activa",
+      fechaCreacion: new Date().toISOString(),
     };
     await docClient.send(
       new PutCommand({
@@ -98,7 +129,10 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
       },
-      body: JSON.stringify(item),
+      body: JSON.stringify({
+        id: vacancyUuid,
+        ...item,
+      }),
     };
   } catch (error: unknown) {
     return {

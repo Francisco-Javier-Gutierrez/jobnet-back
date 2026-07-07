@@ -85,19 +85,21 @@ Si todo sale verde, ¡tu código está listo para revisión y posterior desplieg
 Para asegurar la integridad de la base de datos y la consistencia de los datos en JobNet, se deben seguir las siguientes directrices arquitectónicas:
 
 ### A. Paradigma NoSQL y Single Table Design (STD)
-* **Tabla Única**: Todas las entidades (Usuarios, Vacantes, Chats, Publicaciones, Notificaciones) coexisten en la misma tabla física de DynamoDB.
-* **Prefijos de Claves**:
+
+- **Tabla Única**: Todas las entidades (Usuarios, Vacantes, Chats, Publicaciones, Notificaciones) coexisten en la misma tabla física de DynamoDB.
+- **Prefijos de Claves**:
   - **Partition Key (PK)**: Debe tener siempre el formato prefijado de la entidad (ej. `USER#<userUuid>`, `VACANCY#<vacancyUuid>`, `CHAT#<chatUuid>`, `POST#<postUuid>`).
   - **Sort Key (SK)**: Debe definir lógicamente la partición (ej. `PROFILE` para el perfil, `METADATA` para configuraciones, `MSG#<timestamp>` para mensajes).
-* **Ausencia de Campos Nulos**: Debido a que DynamoDB es NoSQL sin esquema rígido, **no se deben guardar campos vacíos o nulos** en la base de datos. Si un atributo no le pertenece a un rol o está vacío, simplemente no debe existir en su registro.
+- **Ausencia de Campos Nulos**: Debido a que DynamoDB es NoSQL sin esquema rígido, **no se deben guardar campos vacíos o nulos** en la base de datos. Si un atributo no le pertenece a un rol o está vacío, simplemente no debe existir en su registro.
 
 ### B. Mapeo de Roles de Usuario y Cognito Groups
-* Al confirmar un registro, la Lambda `postConfirmation` normaliza los roles y asigna el usuario a su respectivo grupo en Cognito (`ADMIN`, `MODERATOR`, `EMPRESA`, `CANDIDATO`).
-* Si el rol proviene de campos como `custom:role` (ej. `'company'`, `'candidate'`), debe mapearse y traducirse de forma estricta a los grupos en mayúsculas de AWS Cognito y DynamoDB (`EMPRESA`, `CANDIDATO`).
+
+- Al confirmar un registro, la Lambda `postConfirmation` normaliza los roles y asigna el usuario a su respectivo grupo en Cognito (`ADMIN`, `MODERATOR`, `EMPRESA`, `CANDIDATO`).
+- Si el rol proviene de campos como `custom:role` (ej. `'company'`, `'candidate'`), debe mapearse y traducirse de forma estricta a los grupos en mayúsculas de AWS Cognito y DynamoDB (`EMPRESA`, `CANDIDATO`).
 
 ### C. Desarrollo Local con Serverless Offline
-* Para evitar errores del tipo `EADDRINUSE`, la configuración local debe mantener estrictamente separados los puertos de la siguiente forma:
+
+- Para evitar errores del tipo `EADDRINUSE`, la configuración local debe mantener estrictamente separados los puertos de la siguiente forma:
   - **HTTP:** Puerto `3001`
   - **Websockets:** Puerto `3002`
   - **Lambda Port:** Puerto `3003` (especificado en `lambdaPort` para evitar conflictos entre REST y Websockets).
-
