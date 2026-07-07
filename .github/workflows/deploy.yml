@@ -69,6 +69,6 @@ jobs:
           export TF_VAR_lambda_arn_wsDisconnect="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsDisconnect"
           export TF_VAR_lambda_arn_wsDefault="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsDefault"
           export TF_VAR_cognito_user_pool_arn="arn:aws:cognito-idp:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:userpool/$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
-          
+
           cd terraform/environments/prod-api
           terraform apply -auto-approve
