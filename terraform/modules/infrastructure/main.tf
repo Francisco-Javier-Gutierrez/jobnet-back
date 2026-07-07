@@ -39,6 +39,32 @@ resource "aws_cognito_user_pool" "pool" {
     }
   }
 
+  schema {
+    attribute_data_type      = "String"
+    developer_only_attribute = false
+    mutable                  = true
+    name                     = "role"
+    required                 = false
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+
+  schema {
+    attribute_data_type      = "String"
+    developer_only_attribute = false
+    mutable                  = true
+    name                     = "tax_id"
+    required                 = false
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+
   mfa_configuration = "OPTIONAL"
 
   software_token_mfa_configuration {

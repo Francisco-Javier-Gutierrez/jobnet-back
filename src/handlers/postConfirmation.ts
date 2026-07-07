@@ -26,13 +26,24 @@ export const handler: PostConfirmationTriggerHandler = async (
   const sub = userAttributes.sub;
   const username = event.userName;
 
-  // Se asume que el tipo de usuario (CANDIDATO, EMPRESA, etc.) viene como atributo personalizado "custom:tipoUsuario"
-  // O en su defecto, a través del clientMetadata si se envía al registrar
-  // Aquí usamos clientMetadata como mecanismo principal
-  const tipoUsuario =
+  const rawRole =
     event.request.clientMetadata?.tipoUsuario ||
     userAttributes["custom:tipoUsuario"] ||
+    userAttributes["custom:role"] ||
     "CANDIDATO";
+
+  let tipoUsuario = "CANDIDATO";
+  const normalizedRole = rawRole.toLowerCase();
+  if (normalizedRole === "admin") {
+    tipoUsuario = "ADMIN";
+  } else if (normalizedRole === "moderator") {
+    tipoUsuario = "MODERATOR";
+  } else if (normalizedRole === "company" || normalizedRole === "empresa") {
+    tipoUsuario = "EMPRESA";
+  } else if (normalizedRole === "candidate" || normalizedRole === "candidato") {
+    tipoUsuario = "CANDIDATO";
+  }
+
   const nombre =
     event.request.clientMetadata?.nombre || userAttributes.name || "Sin Nombre";
 
@@ -74,13 +85,14 @@ export const handler: PostConfirmationTriggerHandler = async (
     userItem.nombre = nombre;
   } else if (tipoUsuario === "EMPRESA") {
     Object.assign(userItem, {
+      taxId: userAttributes["custom:tax_id"] || "",
       fotoPerfil: "",
       biografia: "",
       enlacesWeb: {},
       ubicacion: {},
       organizacionVerificada: false,
     });
-  } else if (tipoUsuario === "CANDIDATO") {
+  } else {
     Object.assign(userItem, {
       fotoPerfil: "",
       biografia: "",

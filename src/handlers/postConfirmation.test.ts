@@ -50,23 +50,35 @@ describe("postConfirmation handler", () => {
   const createEvent = (
     tipoUsuario: string,
     nombre: string,
-  ): PostConfirmationTriggerEvent => ({
-    version: "1",
-    region: "us-east-1",
-    userPoolId: "test-pool-id",
-    userName: "testuser",
-    callerContext: { awsSdkVersion: "1", clientId: "client-id" },
-    request: {
-      userAttributes: {
-        email: "test@example.com",
-        sub: "uuid-1234",
-        name: nombre,
+    customRole?: string,
+    customTaxId?: string,
+  ): PostConfirmationTriggerEvent => {
+    const userAttributes: Record<string, string> = {
+      email: "test@example.com",
+      sub: "uuid-1234",
+      name: nombre,
+    };
+    if (customRole) {
+      userAttributes["custom:role"] = customRole;
+    }
+    if (customTaxId) {
+      userAttributes["custom:tax_id"] = customTaxId;
+    }
+
+    return {
+      version: "1",
+      region: "us-east-1",
+      userPoolId: "test-pool-id",
+      userName: "testuser",
+      callerContext: { awsSdkVersion: "1", clientId: "client-id" },
+      request: {
+        userAttributes,
+        clientMetadata: tipoUsuario ? { tipoUsuario, nombre } : undefined,
       },
-      clientMetadata: { tipoUsuario, nombre },
-    },
-    response: {},
-    triggerSource: "PostConfirmation_ConfirmSignUp",
-  });
+      response: {},
+      triggerSource: "PostConfirmation_ConfirmSignUp",
+    };
+  };
 
   it("should process CANDIDATO user correctly", async () => {
     const event = createEvent("CANDIDATO", "Test Candidato");
@@ -95,8 +107,8 @@ describe("postConfirmation handler", () => {
   });
 
   it("should fallback to CANDIDATO if no tipoUsuario provided in metadata", async () => {
-    const event = createEvent("", "");
-    event.request.clientMetadata = undefined;
+    const event = createEvent("", "Test");
+    event.request.clientMetadata = { nombre: "Test" } as never;
     await handler(event, {} as never, () => {});
     expect(mockDynamoSend).toHaveBeenCalled();
   });
@@ -133,6 +145,42 @@ describe("postConfirmation handler", () => {
 
   it("should handle unknown tipoUsuario gracefully", async () => {
     const event = createEvent("UNKNOWN_ROLE", "Test");
+    await handler(event, {} as never, () => {});
+    expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should map custom:role correctly for candidate and company", async () => {
+    const event1 = createEvent("", "Candidate Name", "candidate");
+    await handler(event1, {} as never, () => {});
+    expect(mockDynamoSend).toHaveBeenCalled();
+
+    const event2 = createEvent("", "Company Name", "company", "12345678");
+    await handler(event2, {} as never, () => {});
+    expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should map custom:role correctly for admin and moderator", async () => {
+    const event1 = createEvent("", "Admin Name", "admin");
+    await handler(event1, {} as never, () => {});
+    expect(mockDynamoSend).toHaveBeenCalled();
+
+    const event2 = createEvent("", "Mod Name", "moderator");
+    await handler(event2, {} as never, () => {});
+    expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should parse custom:tipoUsuario correctly when clientMetadata is missing", async () => {
+    const event = createEvent("", "Test User");
+    event.request.clientMetadata = undefined;
+    event.request.userAttributes["custom:tipoUsuario"] = "EMPRESA";
+    await handler(event, {} as never, () => {});
+    expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should fallback to Sin Nombre when name is missing", async () => {
+    const event = createEvent("", "");
+    event.request.clientMetadata = undefined;
+    event.request.userAttributes.name = "";
     await handler(event, {} as never, () => {});
     expect(mockDynamoSend).toHaveBeenCalled();
   });
