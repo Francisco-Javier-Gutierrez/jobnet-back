@@ -25,6 +25,7 @@
     "aws-jwt-verify": "^5.2.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/aws-lambda": "^8.10.130",
     "@types/node": "^20.11.0",
     "@vitest/coverage-v8": "^4.1.9",
@@ -35,6 +36,7 @@
     "serverless-esbuild": "^1.50.0",
     "serverless-offline": "^13.3.3",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.63.0",
     "vitest": "^4.1.9"
   }
 }

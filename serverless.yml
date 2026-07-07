@@ -11,6 +11,18 @@ provider:
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, 'us-east-1_local'}
     OPENSEARCH_ENDPOINT: ${env:OPENSEARCH_ENDPOINT, 'localhost:9200'}
 
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+          Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
+        - Effect: Allow
+          Action:
+            - cognito-idp:AdminAddUserToGroup
+          Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${self:provider.environment.COGNITO_USER_POOL_ID}"
+
 plugins:
   - serverless-esbuild
   - serverless-offline
@@ -27,8 +39,16 @@ custom:
   serverless-offline:
     httpPort: 3001
     websocketPort: 3002
+    lambdaPort: 3003
 
 functions:
+  cognitoPostConfirmation:
+    handler: src/handlers/postConfirmation.handler
+    events:
+      - cognitoUserPool:
+          pool: jobnet-user-pool-${self:provider.stage}
+          trigger: PostConfirmation
+          existing: true
   getJobs:
     handler: src/handlers/jobs.getJobs
     events:
@@ -63,7 +83,7 @@ functions:
           authorizer:
             name: wsAuthorizer
             identitySource:
-              - 'route.request.querystring.token'
+              - "route.request.querystring.token"
   wsDisconnect:
     handler: src/handlers/wsHandlers.disconnect
     events:
