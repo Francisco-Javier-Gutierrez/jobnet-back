@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { CognitoJwtVerifier } from "aws-jwt-verify";
-import { APIGatewayRequestAuthorizerEventV2 } from "aws-lambda";
 
 // Extract USER_POOL_ID from environment
 const userPoolId = process.env.COGNITO_USER_POOL_ID;
