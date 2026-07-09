@@ -5,6 +5,8 @@ provider:
   runtime: nodejs18.x
   stage: ${opt:stage, 'dev'}
   region: us-east-1
+  httpApi:
+    cors: true
   environment:
     DYNAMODB_TABLE: jobnet-jobs-${self:provider.stage}
     S3_UPLOAD_BUCKET: jobnet-uploads-${self:provider.stage}
@@ -17,11 +19,22 @@ provider:
         - Effect: Allow
           Action:
             - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Query
+            - dynamodb:Scan
           Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
         - Effect: Allow
           Action:
             - cognito-idp:AdminAddUserToGroup
           Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${self:provider.environment.COGNITO_USER_POOL_ID}"
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:PutObjectAcl
+          Resource: "arn:aws:s3:::${self:provider.environment.S3_UPLOAD_BUCKET}/*"
 
 plugins:
   - serverless-esbuild
@@ -94,3 +107,15 @@ functions:
     events:
       - websocket:
           route: $default
+  getProfile:
+    handler: src/handlers/profile.getProfile
+    events:
+      - httpApi:
+          path: /profile/{id}
+          method: get
+  updateProfile:
+    handler: src/handlers/profile.updateProfile
+    events:
+      - httpApi:
+          path: /profile/{id}
+          method: post

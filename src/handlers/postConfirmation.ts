@@ -9,7 +9,19 @@ import {
   AdminAddUserToGroupCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
-const dynamoClient = new DynamoDBClient({});
+const isOffline = process.env.IS_OFFLINE === "true";
+
+const dynamoClient = isOffline
+  ? new DynamoDBClient({
+      endpoint: "http://localhost:8000",
+      region: "localhost",
+      credentials: {
+        accessKeyId: "local",
+        secretAccessKey: "local",
+      },
+    })
+  : new DynamoDBClient({});
+
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
 const cognitoClient = new CognitoIdentityProviderClient({});
 
