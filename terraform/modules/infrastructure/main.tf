@@ -88,6 +88,26 @@ resource "aws_cognito_user_pool_client" "client" {
   explicit_auth_flows = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
 }
 
+resource "aws_cognito_user_group" "group_candidato" {
+  name         = "CANDIDATO"
+  user_pool_id = aws_cognito_user_pool.pool.id
+}
+
+resource "aws_cognito_user_group" "group_empresa" {
+  name         = "EMPRESA"
+  user_pool_id = aws_cognito_user_pool.pool.id
+}
+
+resource "aws_cognito_user_group" "group_admin" {
+  name         = "ADMIN"
+  user_pool_id = aws_cognito_user_pool.pool.id
+}
+
+resource "aws_cognito_user_group" "group_moderator" {
+  name         = "MODERATOR"
+  user_pool_id = aws_cognito_user_pool.pool.id
+}
+
 resource "aws_dynamodb_table" "jobs" {
   name         = "jobnet-jobs-${var.environment}"
   billing_mode = "PAY_PER_REQUEST"
