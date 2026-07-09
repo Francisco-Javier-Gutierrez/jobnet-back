@@ -66,6 +66,7 @@ export const getJobs: APIGatewayProxyHandler = async () => {
       id: item.PK.replace("VACANCY#", ""),
       title: item.titulo || item.title,
       company: item.company || "Empresa",
+      empresaUuid: item.empresaUuid || "",
       lat: item.ubicacion?.lat || item.lat || 0,
       lng: item.ubicacion?.lng || item.lng || 0,
       modalidad: item.modalidad || "Presencial",
