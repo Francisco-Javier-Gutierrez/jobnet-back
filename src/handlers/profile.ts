@@ -31,6 +31,7 @@ export const getProfile: APIGatewayProxyHandler = async (event) => {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ error: "Missing path parameter 'id'" }),
       };
@@ -52,6 +53,7 @@ export const getProfile: APIGatewayProxyHandler = async (event) => {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ error: "Profile not found" }),
       };
@@ -62,6 +64,7 @@ export const getProfile: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(result.Item),
     };
@@ -71,6 +74,7 @@ export const getProfile: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ error: (error as Error).message }),
     };
@@ -86,6 +90,7 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({ error: "Missing path parameter 'id'" }),
       };
@@ -131,6 +136,7 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(updatedItem),
     };
@@ -140,6 +146,7 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ error: (error as Error).message }),
     };

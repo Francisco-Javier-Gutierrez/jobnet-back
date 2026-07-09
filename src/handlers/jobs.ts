@@ -80,6 +80,7 @@ export const getJobs: APIGatewayProxyHandler = async () => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(jobs),
     };
@@ -89,6 +90,7 @@ export const getJobs: APIGatewayProxyHandler = async () => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ error: (error as Error).message }),
     };
@@ -129,6 +131,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         id: vacancyUuid,
@@ -141,6 +144,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ error: (error as Error).message }),
     };
@@ -160,6 +164,7 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async () => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ url, key }),
     };
@@ -169,6 +174,7 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async () => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ error: (error as Error).message }),
     };
@@ -196,6 +202,7 @@ export const sendNotificationEmail: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ success: true }),
     };
@@ -205,6 +212,7 @@ export const sendNotificationEmail: APIGatewayProxyHandler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({ error: (error as Error).message }),
     };
