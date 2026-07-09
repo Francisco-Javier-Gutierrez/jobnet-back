@@ -4,6 +4,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 
 const isOffline = process.env.IS_OFFLINE === "true";
@@ -139,6 +140,40 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(updatedItem),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const listProfiles: APIGatewayProxyHandler = async (event) => {
+  try {
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk",
+        ExpressionAttributeValues: {
+          ":sk": "PROFILE",
+        },
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(result.Items || []),
     };
   } catch (error: unknown) {
     return {

@@ -60,16 +60,17 @@ export const handler: PostConfirmationTriggerHandler = async (
     event.request.clientMetadata?.nombre || userAttributes.name || "Sin Nombre";
 
   // 1. Asignar el usuario al grupo de Cognito
-  if (process.env.COGNITO_USER_POOL_ID) {
+  const userPoolId = event.userPoolId || process.env.COGNITO_USER_POOL_ID;
+  if (userPoolId && userPoolId !== "us-east-1_local") {
     try {
       await cognitoClient.send(
         new AdminAddUserToGroupCommand({
-          UserPoolId: process.env.COGNITO_USER_POOL_ID,
+          UserPoolId: userPoolId,
           Username: username,
           GroupName: tipoUsuario,
         }),
       );
-      console.log(`Usuario asignado al grupo ${tipoUsuario}`);
+      console.log(`Usuario asignado al grupo ${tipoUsuario} en UserPool ${userPoolId}`);
     } catch (error: unknown) {
       // Ignoramos si el grupo no existe u ocurre otro error menor, pero lo logueamos
       console.error("Error asignando grupo en Cognito:", error);

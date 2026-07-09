@@ -28,7 +28,7 @@ provider:
         - Effect: Allow
           Action:
             - cognito-idp:AdminAddUserToGroup
-          Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${self:provider.environment.COGNITO_USER_POOL_ID}"
+          Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/*"
         - Effect: Allow
           Action:
             - s3:PutObject
@@ -119,3 +119,34 @@ functions:
       - httpApi:
           path: /profile/{id}
           method: post
+  listProfiles:
+    handler: src/handlers/profile.listProfiles
+    events:
+      - httpApi:
+          path: /profiles
+          method: get
+  getCatalog:
+    handler: src/handlers/catalog.getCatalog
+    events:
+      - httpApi:
+          path: /catalog
+          method: get
+  createCatalogItem:
+    handler: src/handlers/catalog.createCatalogItem
+    events:
+      - httpApi:
+          path: /catalog
+          method: post
+  updateCatalogItem:
+    handler: src/handlers/catalog.updateCatalogItem
+    events:
+      - httpApi:
+          path: /catalog/{id}
+          method: put
+  deleteCatalogItem:
+    handler: src/handlers/catalog.deleteCatalogItem
+    events:
+      - httpApi:
+          path: /catalog/{id}
+          method: delete
+

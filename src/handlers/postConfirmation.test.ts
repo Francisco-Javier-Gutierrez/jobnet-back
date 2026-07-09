@@ -127,9 +127,18 @@ describe("postConfirmation handler", () => {
     await expect(handler(event, {} as never, () => {})).resolves.toBeDefined();
   });
 
-  it("should skip Cognito assignment if USER_POOL_ID is undefined", async () => {
+  it("should skip Cognito assignment if USER_POOL_ID is undefined or empty", async () => {
     process.env.COGNITO_USER_POOL_ID = "";
     const event = createEvent("CANDIDATO", "Test");
+    (event as any).userPoolId = "";
+    await handler(event, {} as never, () => {});
+    expect(mockCognitoSend).not.toHaveBeenCalled();
+    expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should skip Cognito assignment if USER_POOL_ID is us-east-1_local", async () => {
+    const event = createEvent("CANDIDATO", "Test");
+    event.userPoolId = "us-east-1_local";
     await handler(event, {} as never, () => {});
     expect(mockCognitoSend).not.toHaveBeenCalled();
     expect(mockDynamoSend).toHaveBeenCalled();
