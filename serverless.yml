@@ -28,7 +28,7 @@ provider:
         - Effect: Allow
           Action:
             - cognito-idp:AdminAddUserToGroup
-          Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/${self:provider.environment.COGNITO_USER_POOL_ID}"
+          Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/*"
         - Effect: Allow
           Action:
             - s3:PutObject
@@ -119,3 +119,70 @@ functions:
       - httpApi:
           path: /profile/{id}
           method: post
+  listProfiles:
+    handler: src/handlers/profile.listProfiles
+    events:
+      - httpApi:
+          path: /profiles
+          method: get
+  getCatalog:
+    handler: src/handlers/catalog.getCatalog
+    events:
+      - httpApi:
+          path: /catalog
+          method: get
+  createCatalogItem:
+    handler: src/handlers/catalog.createCatalogItem
+    events:
+      - httpApi:
+          path: /catalog
+          method: post
+  updateCatalogItem:
+    handler: src/handlers/catalog.updateCatalogItem
+    events:
+      - httpApi:
+          path: /catalog/{id}
+          method: put
+  deleteCatalogItem:
+    handler: src/handlers/catalog.deleteCatalogItem
+    events:
+      - httpApi:
+          path: /catalog/{id}
+          method: delete
+  updateJob:
+    handler: src/handlers/jobs.updateJob
+    events:
+      - httpApi:
+          path: /jobs/{id}
+          method: put
+  deleteJob:
+    handler: src/handlers/jobs.deleteJob
+    events:
+      - httpApi:
+          path: /jobs/{id}
+          method: delete
+  applyToJob:
+    handler: src/handlers/applications.applyToJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/apply
+          method: post
+  getJobApplicants:
+    handler: src/handlers/applications.getJobApplicants
+    events:
+      - httpApi:
+          path: /jobs/{id}/applicants
+          method: get
+  getMyApplications:
+    handler: src/handlers/applications.getMyApplications
+    events:
+      - httpApi:
+          path: /applications
+          method: get
+  updateApplicationStatus:
+    handler: src/handlers/applications.updateApplicationStatus
+    events:
+      - httpApi:
+          path: /applications/{jobId}/{candidateId}/status
+          method: put
+
