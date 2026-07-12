@@ -149,4 +149,40 @@ functions:
       - httpApi:
           path: /catalog/{id}
           method: delete
+  updateJob:
+    handler: src/handlers/jobs.updateJob
+    events:
+      - httpApi:
+          path: /jobs/{id}
+          method: put
+  deleteJob:
+    handler: src/handlers/jobs.deleteJob
+    events:
+      - httpApi:
+          path: /jobs/{id}
+          method: delete
+  applyToJob:
+    handler: src/handlers/applications.applyToJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/apply
+          method: post
+  getJobApplicants:
+    handler: src/handlers/applications.getJobApplicants
+    events:
+      - httpApi:
+          path: /jobs/{id}/applicants
+          method: get
+  getMyApplications:
+    handler: src/handlers/applications.getMyApplications
+    events:
+      - httpApi:
+          path: /applications
+          method: get
+  updateApplicationStatus:
+    handler: src/handlers/applications.updateApplicationStatus
+    events:
+      - httpApi:
+          path: /applications/{jobId}/{candidateId}/status
+          method: put
 

@@ -78,6 +78,12 @@ resource "aws_cognito_user_pool" "pool" {
     from_email_address    = "contacto@franciscojgh.com"
     source_arn            = "arn:aws:ses:us-east-1:${data.aws_caller_identity.current.account_id}:identity/franciscojgh.com"
   }
+
+  # The PostConfirmation trigger is managed by Serverless Framework,
+  # so we ignore lambda_config changes to avoid Terraform removing it.
+  lifecycle {
+    ignore_changes = [lambda_config]
+  }
 }
 
 resource "aws_cognito_user_pool_client" "client" {
@@ -166,28 +172,28 @@ resource "aws_s3_bucket_policy" "uploads_policy" {
   })
 }
 
-resource "aws_opensearch_domain" "search" {
-  domain_name    = "jobnet-search-${var.environment}"
-  engine_version = "OpenSearch_2.11"
-
-  cluster_config {
-    instance_type = "t3.small.search"
-  }
-
-  ebs_options {
-    ebs_enabled = true
-    volume_size = 10
-  }
-
-  access_policies = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = "es:*"
-        Resource  = "arn:aws:es:us-east-1:${data.aws_caller_identity.current.account_id}:domain/jobnet-search-${var.environment}/*"
-      }
-    ]
-  })
-}
+# resource "aws_opensearch_domain" "search" {
+#   domain_name    = "jobnet-search-${var.environment}"
+#   engine_version = "OpenSearch_2.11"
+# 
+#   cluster_config {
+#     instance_type = "t3.small.search"
+#   }
+# 
+#   ebs_options {
+#     ebs_enabled = true
+#     volume_size = 10
+#   }
+# 
+#   access_policies = jsonencode({
+#     Version = "2012-10-17"
+#     Statement = [
+#       {
+#         Effect    = "Allow"
+#         Principal = "*"
+#         Action    = "es:*"
+#         Resource  = "arn:aws:es:us-east-1:${data.aws_caller_identity.current.account_id}:domain/jobnet-search-${var.environment}/*"
+#       }
+#     ]
+#   })
+# }

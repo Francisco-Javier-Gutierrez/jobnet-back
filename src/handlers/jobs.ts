@@ -4,6 +4,8 @@ import {
   DynamoDBDocumentClient,
   ScanCommand,
   PutCommand,
+  GetCommand,
+  UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -205,6 +207,222 @@ export const sendNotificationEmail: APIGatewayProxyHandler = async (event) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ success: true }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const updateJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Missing path parameter 'id'" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+
+    // Verify the job exists and check ownership
+    const existing = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${id}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    if (!existing.Item) {
+      return {
+        statusCode: 404,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Job not found" }),
+      };
+    }
+
+    // Check ownership if empresaUuid is provided
+    if (body.empresaUuid && existing.Item.empresaUuid !== body.empresaUuid) {
+      return {
+        statusCode: 403,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Not authorized to update this job" }),
+      };
+    }
+
+    // Build update expression dynamically
+    const allowedFields = [
+      "titulo",
+      "title",
+      "company",
+      "descripcion",
+      "description",
+      "modalidad",
+      "salario",
+      "habilidadesRequeridas",
+      "skills",
+      "ubicacion",
+      "lat",
+      "lng",
+      "location",
+      "estado",
+    ];
+
+    const expressionParts: string[] = [];
+    const expressionAttrValues: Record<string, any> = {};
+    const expressionAttrNames: Record<string, string> = {};
+
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) {
+        const attrKey = `#${field}`;
+        const valKey = `:${field}`;
+        expressionParts.push(`${attrKey} = ${valKey}`);
+        expressionAttrNames[attrKey] = field;
+        expressionAttrValues[valKey] = body[field];
+      }
+    }
+
+    if (expressionParts.length === 0) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "No valid fields to update" }),
+      };
+    }
+
+    expressionParts.push("#updatedAt = :updatedAt");
+    expressionAttrNames["#updatedAt"] = "updatedAt";
+    expressionAttrValues[":updatedAt"] = new Date().toISOString();
+
+    const result = await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${id}`,
+          SK: "METADATA",
+        },
+        UpdateExpression: `SET ${expressionParts.join(", ")}`,
+        ExpressionAttributeNames: expressionAttrNames,
+        ExpressionAttributeValues: expressionAttrValues,
+        ReturnValues: "ALL_NEW",
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id,
+        ...result.Attributes,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const deleteJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Missing path parameter 'id'" }),
+      };
+    }
+
+    // Verify the job exists
+    const existing = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${id}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    if (!existing.Item) {
+      return {
+        statusCode: 404,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Job not found" }),
+      };
+    }
+
+    // Soft delete: set estado to CERRADA and add deletedAt timestamp
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${id}`,
+          SK: "METADATA",
+        },
+        UpdateExpression: "SET estado = :estado, deletedAt = :deletedAt",
+        ExpressionAttributeValues: {
+          ":estado": "CERRADA",
+          ":deletedAt": new Date().toISOString(),
+        },
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ success: true, id, estado: "CERRADA" }),
     };
   } catch (error: unknown) {
     return {
