@@ -106,6 +106,7 @@ export const getJobs: APIGatewayProxyHandler = async () => {
         modalidad: item.modalidad || "Presencial",
         salario: item.salario || 0,
         habilidadesRequeridas: item.habilidadesRequeridas || [],
+        sectores: item.sectores || [],
         descripcion: item.descripcion || "Sin descripción",
         pdfUrl: item.pdfUrl || "",
         estado: item.estado || "Activa",
@@ -155,6 +156,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       modalidad: body.modalidad || "Presencial",
       salario: body.salario || 0,
       habilidadesRequeridas: body.habilidadesRequeridas || [],
+      sectores: body.sectores || [],
       ubicacion: {
         lat: body.lat || 0,
         lng: body.lng || 0,
@@ -457,6 +459,7 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       "salario",
       "habilidadesRequeridas",
       "skills",
+      "sectores",
       "ubicacion",
       "lat",
       "lng",
