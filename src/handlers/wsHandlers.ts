@@ -1,19 +1,331 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export const connect = async (event: any) => {
-  const connectionId = event.requestContext.connectionId;
-  console.log(`Connection established: ${connectionId}`);
-  // In a real app, save this connection ID to DynamoDB with the user ID from the authorizer
-  return { statusCode: 200, body: "Connected" };
+import { APIGatewayProxyHandler } from "aws-lambda";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  GetCommand,
+  QueryCommand,
+  DeleteCommand,
+} from "@aws-sdk/lib-dynamodb";
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand,
+} from "@aws-sdk/client-apigatewaymanagementapi";
+
+const isOffline = process.env.IS_OFFLINE === "true";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+
+const dbClient = isOffline
+  ? new DynamoDBClient({
+      endpoint: "http://localhost:8000",
+      region: "localhost",
+      credentials: {
+        accessKeyId: "local",
+        secretAccessKey: "local",
+      },
+    })
+  : new DynamoDBClient({});
+
+const docClient = DynamoDBDocumentClient.from(dbClient);
+
+const getEndpoint = (event: any) => {
+  const domainName = event.requestContext.domainName;
+  const stage = event.requestContext.stage;
+  if (isOffline) {
+    return "http://localhost:3002";
+  }
+  return `https://${domainName}/${stage}`;
 };
 
-export const disconnect = async (event: any) => {
+export const connect: APIGatewayProxyHandler = async (event: any) => {
+  const connectionId = event.requestContext.connectionId;
+  const userId = event.requestContext.authorizer?.principalId || "anonymous";
+  console.log(`Connection established: ${connectionId} for user ${userId}`);
+
+  try {
+    // 1. Save connection ID lookup metadata
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `WS_CONNECTION#${connectionId}`,
+          SK: "METADATA",
+          userId,
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    );
+
+    // 2. Save user-to-connection mapping
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `USER#${userId}`,
+          SK: `WS_CONNECTION#${connectionId}`,
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    );
+
+    return { statusCode: 200, body: "Connected" };
+  } catch (error: any) {
+    console.error("Error saving WS connection:", error);
+    return { statusCode: 500, body: `Error: ${error.message}` };
+  }
+};
+
+export const disconnect: APIGatewayProxyHandler = async (event: any) => {
   const connectionId = event.requestContext.connectionId;
   console.log(`Connection closed: ${connectionId}`);
-  // In a real app, remove this connection ID from DynamoDB
-  return { statusCode: 200, body: "Disconnected" };
+
+  try {
+    // 1. Get connection metadata to retrieve userId
+    const lookup = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `WS_CONNECTION#${connectionId}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    if (lookup.Item) {
+      const userId = lookup.Item.userId;
+      // Delete user mapping
+      await docClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            PK: `USER#${userId}`,
+            SK: `WS_CONNECTION#${connectionId}`,
+          },
+        }),
+      );
+    }
+
+    // Delete connection metadata
+    await docClient.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: {
+          PK: `WS_CONNECTION#${connectionId}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    return { statusCode: 200, body: "Disconnected" };
+  } catch (error: any) {
+    console.error("Error deleting WS connection:", error);
+    return { statusCode: 500, body: `Error: ${error.message}` };
+  }
 };
 
-export const defaultRoute = async (event: any) => {
+export const defaultRoute: APIGatewayProxyHandler = async (event: any) => {
   console.log(`Default route hit: ${event.requestContext.connectionId}`);
   return { statusCode: 200, body: "Default route" };
+};
+
+export const sendMessage = async (event: any) => {
+  const connectionId = event.requestContext.connectionId;
+  const senderId = event.requestContext.authorizer?.principalId || "anonymous";
+  console.log(`sendMessage route hit by connection: ${connectionId}`);
+
+  try {
+    const body =
+      typeof event.body === "string"
+        ? JSON.parse(event.body)
+        : event.body || {};
+    const { jobId, candidateId, text } = body;
+
+    if (!jobId || !candidateId || !text) {
+      return {
+        statusCode: 400,
+        body: "Missing jobId, candidateId or text parameters",
+      };
+    }
+
+    // Fetch the job details to check ownership
+    const jobResult = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${jobId}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    if (!jobResult.Item) {
+      return { statusCode: 404, body: "Vacancy not found" };
+    }
+
+    const job = jobResult.Item;
+    const companyId = job.empresaUuid;
+
+    // Validate that sender is either the candidate or the company
+    if (senderId !== candidateId && senderId !== companyId) {
+      return {
+        statusCode: 403,
+        body: "Not authorized to send messages in this conversation",
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+    const messageItem = {
+      PK: `CHAT#${jobId}#${candidateId}`,
+      SK: `MSG#${timestamp}`,
+      senderId,
+      text,
+      createdAt: timestamp,
+    };
+
+    // Save chat message
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: messageItem,
+      }),
+    );
+
+    // Identify recipient
+    const recipientId = senderId === candidateId ? companyId : candidateId;
+
+    // Fetch recipient active WebSocket connections
+    const connectionsResult = await docClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        ExpressionAttributeValues: {
+          ":pk": `USER#${recipientId}`,
+          ":skPrefix": "WS_CONNECTION#",
+        },
+      }),
+    );
+
+    const activeConnections = connectionsResult.Items || [];
+    const apigwClient = new ApiGatewayManagementApiClient({
+      endpoint: getEndpoint(event),
+    });
+
+    // Route messages to all active connection IDs of the recipient
+    const sendPromises = activeConnections.map(async (connItem) => {
+      const targetConnectionId = connItem.SK.replace("WS_CONNECTION#", "");
+      try {
+        await apigwClient.send(
+          new PostToConnectionCommand({
+            ConnectionId: targetConnectionId,
+            Data: Buffer.from(
+              JSON.stringify({
+                action: "receiveMessage",
+                jobId,
+                candidateId,
+                senderId,
+                text,
+                createdAt: timestamp,
+              }),
+            ),
+          }),
+        );
+      } catch (err: any) {
+        // If connection is stale/gone, delete it from DynamoDB
+        if (err.statusCode === 410) {
+          console.log(
+            `Stale connection detected: ${targetConnectionId}, cleaning up.`,
+          );
+          await docClient.send(
+            new DeleteCommand({
+              TableName: tableName,
+              Key: {
+                PK: `USER#${recipientId}`,
+                SK: `WS_CONNECTION#${targetConnectionId}`,
+              },
+            }),
+          );
+          await docClient.send(
+            new DeleteCommand({
+              TableName: tableName,
+              Key: {
+                PK: `WS_CONNECTION#${targetConnectionId}`,
+                SK: "METADATA",
+              },
+            }),
+          );
+        } else {
+          console.error(`Error sending message to ${targetConnectionId}:`, err);
+        }
+      }
+    });
+
+    await Promise.all(sendPromises);
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ success: true, message: messageItem }),
+    };
+  } catch (error: any) {
+    console.error("Error sending WebSocket message:", error);
+    return { statusCode: 500, body: `Error: ${error.message}` };
+  }
+};
+
+export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
+  const jobId = event.pathParameters?.jobId;
+  const candidateId = event.pathParameters?.candidateId;
+
+  if (!jobId || !candidateId) {
+    return {
+      statusCode: 400,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        error: "Missing parameters 'jobId' or 'candidateId'",
+      }),
+    };
+  }
+
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        ExpressionAttributeValues: {
+          ":pk": `CHAT#${jobId}#${candidateId}`,
+          ":skPrefix": "MSG#",
+        },
+      }),
+    );
+
+    const messages = (result.Items || []).map((m) => ({
+      senderId: m.senderId,
+      text: m.text,
+      createdAt: m.createdAt,
+    }));
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(messages),
+    };
+  } catch (error: any) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: error.message }),
+    };
+  }
 };

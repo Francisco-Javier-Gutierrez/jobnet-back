@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { APIGatewayProxyEvent } from "aws-lambda";
 
 const { mockDynamoSend } = vi.hoisted(() => {
   return {
@@ -9,6 +8,15 @@ const { mockDynamoSend } = vi.hoisted(() => {
 
 vi.mock("@aws-sdk/client-dynamodb", () => ({
   DynamoDBClient: class {},
+}));
+
+vi.mock("@aws-sdk/client-ses", () => ({
+  SESClient: class {
+    send = vi.fn().mockResolvedValue({});
+  },
+  SendEmailCommand: class {
+    constructor(public params: any) {}
+  },
 }));
 
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
@@ -401,10 +409,21 @@ describe("applications handler", () => {
       mockDynamoSend.mockResolvedValueOnce({});
       // UpdateCommand for USER# item
       mockDynamoSend.mockResolvedValueOnce({});
+      // GetCommand for candidate profile
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { email: "candidate@example.com" },
+      });
+      // GetCommand for job details
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { titulo: "Software Engineer", company: "Company" },
+      });
 
       const event = {
         pathParameters: { jobId: "job-1", candidateId: "user-1" },
-        body: JSON.stringify({ status: "ENTREVISTA" }),
+        body: JSON.stringify({
+          status: "ENTREVISTA",
+          detallesEntrevista: "Lunes 10am",
+        }),
       } as any;
 
       const response = await updateApplicationStatus(
@@ -418,7 +437,7 @@ describe("applications handler", () => {
       expect(body.candidateId).toBe("user-1");
       expect(body.status).toBe("ENTREVISTA");
       expect(body.updatedAt).toBeDefined();
-      expect(mockDynamoSend).toHaveBeenCalledTimes(3);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(5);
     });
 
     it.each(["PENDIENTE", "REVISADO", "ENTREVISTA", "ACEPTADO", "RECHAZADO"])(
@@ -429,6 +448,12 @@ describe("applications handler", () => {
         });
         mockDynamoSend.mockResolvedValueOnce({});
         mockDynamoSend.mockResolvedValueOnce({});
+        mockDynamoSend.mockResolvedValueOnce({
+          Item: { email: "candidate@example.com" },
+        });
+        mockDynamoSend.mockResolvedValueOnce({
+          Item: { titulo: "SDE", company: "Company" },
+        });
 
         const event = {
           pathParameters: { jobId: "job-1", candidateId: "user-1" },
