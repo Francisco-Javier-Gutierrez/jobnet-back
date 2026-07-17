@@ -154,7 +154,7 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-export const listProfiles: APIGatewayProxyHandler = async (event) => {
+export const listProfiles: APIGatewayProxyHandler = async () => {
   try {
     const result = await docClient.send(
       new ScanCommand({

@@ -185,4 +185,42 @@ functions:
       - httpApi:
           path: /applications/{jobId}/{candidateId}/status
           method: put
+  getPosts:
+    handler: src/handlers/posts.getPosts
+    events:
+      - httpApi:
+          path: /posts
+          method: get
+  createPost:
+    handler: src/handlers/posts.createPost
+    events:
+      - httpApi:
+          path: /posts
+          method: post
+  toggleLikePost:
+    handler: src/handlers/posts.toggleLikePost
+    events:
+      - httpApi:
+          path: /posts/{id}/like
+          method: post
+  addCommentPost:
+    handler: src/handlers/posts.addCommentPost
+    events:
+      - httpApi:
+          path: /posts/{id}/comment
+          method: post
+  deleteCommentPost:
+    handler: src/handlers/posts.deleteCommentPost
+    events:
+      - httpApi:
+          path: /posts/{id}/comment/{commentId}
+          method: delete
+  toggleBookmarkPost:
+    handler: src/handlers/posts.toggleBookmarkPost
+    events:
+      - httpApi:
+          path: /posts/{id}/bookmark
+          method: post
+
+
 

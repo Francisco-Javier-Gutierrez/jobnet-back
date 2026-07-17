@@ -75,6 +75,7 @@ export const getJobs: APIGatewayProxyHandler = async () => {
       salario: item.salario || 0,
       habilidadesRequeridas: item.habilidadesRequeridas || [],
       descripcion: item.descripcion || "Sin descripción",
+      pdfUrl: item.pdfUrl || "",
       createdAt: item.fechaCreacion || item.createdAt,
     }));
     return {
@@ -119,6 +120,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       },
       lat: body.lat || 0,
       lng: body.lng || 0,
+      pdfUrl: body.pdfUrl || "",
       estado: "Activa",
       fechaCreacion: new Date().toISOString(),
     };
@@ -153,12 +155,22 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-export const getUploadPresignedUrl: APIGatewayProxyHandler = async () => {
+export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
   try {
-    const key = `uploads/${Date.now()}-${Math.random().toString(36).substring(2)}`;
+    const query = event.queryStringParameters || {};
+    const folder = query.folder || "general";
+    const filename = query.filename || "file";
+    const userId = query.userId || "anonymous";
+
+    // Clean spaces and special characters from filename
+    const cleanFilename = filename.replace(/\s+/g, "_");
+    const timestamp = Date.now();
+    const key = `uploads/${folder}/${userId}/${timestamp}-${cleanFilename}`;
+
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: key,
+      ContentType: query.contentType || undefined,
     });
     const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     return {
