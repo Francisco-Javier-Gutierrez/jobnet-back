@@ -21,10 +21,16 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   ScanCommand: class {
     constructor(public params: any) {}
   },
+  QueryCommand: class {
+    constructor(public params: any) {}
+  },
   PutCommand: class {
     constructor(public params: any) {}
   },
   GetCommand: class {
+    constructor(public params: any) {}
+  },
+  UpdateCommand: class {
     constructor(public params: any) {}
   },
   DeleteCommand: class {
@@ -32,7 +38,13 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import { getPosts, createPost, toggleLikePost, addCommentPost, deleteCommentPost } from "./posts";
+import {
+  getPosts,
+  createPost,
+  toggleLikePost,
+  addCommentPost,
+  deleteCommentPost,
+} from "./posts";
 
 describe("posts handler", () => {
   beforeEach(() => {
@@ -193,7 +205,9 @@ describe("posts handler", () => {
 
       const response = await toggleLikePost(event, {} as any, () => {});
       expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.body).error).toContain("Falta el parámetro 'id'");
+      expect(JSON.parse(response.body).error).toContain(
+        "Falta el parámetro 'id'",
+      );
     });
 
     it("should return 400 if userUuid is missing in body", async () => {
@@ -204,7 +218,9 @@ describe("posts handler", () => {
 
       const response = await toggleLikePost(event, {} as any, () => {});
       expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.body).error).toContain("Falta el identificador 'userUuid'");
+      expect(JSON.parse(response.body).error).toContain(
+        "Falta el identificador 'userUuid'",
+      );
     });
 
     it("should add a like if it does not exist", async () => {
@@ -320,6 +336,9 @@ describe("posts handler", () => {
     });
 
     it("should delete a comment successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [{ PK: "POST#post-1", SK: "comment-1", parentId: null }],
+      }); // QueryCommand success
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand success
 
       const event = {

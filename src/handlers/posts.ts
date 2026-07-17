@@ -188,7 +188,9 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la publicación" }),
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la publicación",
+        }),
       };
     }
 
@@ -199,7 +201,9 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Falta el identificador 'userUuid' en el cuerpo" }),
+        body: JSON.stringify({
+          error: "Falta el identificador 'userUuid' en el cuerpo",
+        }),
       };
     }
 
@@ -262,7 +266,9 @@ export const addCommentPost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la publicación" }),
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la publicación",
+        }),
       };
     }
 
@@ -373,13 +379,23 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: true, postId, commentId, action: "DELETED_REPLY" }),
+        body: JSON.stringify({
+          success: true,
+          postId,
+          commentId,
+          action: "DELETED_REPLY",
+        }),
       };
     }
 
     // Level 1 main comments (no parentId)
     // Check if there are other comments that have parentId = commentId
-    const hasChildren = items.some((item: any) => item.SK.startsWith("COMMENT#") && item.parentId === commentId && !item.isDeleted);
+    const hasChildren = items.some(
+      (item: any) =>
+        item.SK.startsWith("COMMENT#") &&
+        item.parentId === commentId &&
+        !item.isDeleted,
+    );
 
     if (hasChildren) {
       // Soft delete: update to placeholder
@@ -390,7 +406,8 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
             PK: `POST#${postId}`,
             SK: commentId,
           },
-          UpdateExpression: "SET content = :deletedText, author = :deletedAuthor, isDeleted = :isDeleted",
+          UpdateExpression:
+            "SET content = :deletedText, author = :deletedAuthor, isDeleted = :isDeleted",
           ExpressionAttributeValues: {
             ":deletedText": "Comentario no disponible",
             ":deletedAuthor": "Eliminado",
@@ -402,7 +419,13 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: true, postId, commentId, action: "SOFT_DELETED_PARENT", isDeleted: true }),
+        body: JSON.stringify({
+          success: true,
+          postId,
+          commentId,
+          action: "SOFT_DELETED_PARENT",
+          isDeleted: true,
+        }),
       };
     } else {
       // Hard delete: delete entirely since it has no children
@@ -419,7 +442,12 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ success: true, postId, commentId, action: "DELETED_PARENT" }),
+        body: JSON.stringify({
+          success: true,
+          postId,
+          commentId,
+          action: "DELETED_PARENT",
+        }),
       };
     }
   } catch (error: unknown) {
@@ -438,7 +466,9 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la publicación" }),
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la publicación",
+        }),
       };
     }
 
@@ -449,7 +479,9 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Falta el identificador 'userUuid' en el cuerpo" }),
+        body: JSON.stringify({
+          error: "Falta el identificador 'userUuid' en el cuerpo",
+        }),
       };
     }
 

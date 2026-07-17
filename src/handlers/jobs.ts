@@ -54,6 +54,36 @@ const bucketName = process.env.S3_UPLOAD_BUCKET || "jobnet-uploads-dev";
 
 export const getJobs: APIGatewayProxyHandler = async () => {
   try {
+    // 1. Fetch all company profiles to check status
+    const profilesResult = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk",
+        ExpressionAttributeValues: {
+          ":sk": "PROFILE",
+        },
+      }),
+    );
+
+    const suspendedCompanies = new Set<string>();
+    (profilesResult.Items || []).forEach((p: any) => {
+      const companyId = p.PK.replace("USER#", "");
+      if (
+        p.estadoCuenta === "SUSPENDIDA" ||
+        p.estadoCuenta === "SUSPENDIDA_TEMPORAL"
+      ) {
+        // If it's a temporal suspension, check if it's still active
+        if (p.estadoCuenta === "SUSPENDIDA_TEMPORAL" && p.fechaFinSuspension) {
+          if (new Date() < new Date(p.fechaFinSuspension)) {
+            suspendedCompanies.add(companyId);
+          }
+        } else {
+          suspendedCompanies.add(companyId);
+        }
+      }
+    });
+
+    // 2. Fetch all vacancies
     const result = await docClient.send(
       new ScanCommand({
         TableName: tableName,
@@ -64,20 +94,31 @@ export const getJobs: APIGatewayProxyHandler = async () => {
         },
       }),
     );
-    const jobs = (result.Items || []).map((item) => ({
-      id: item.PK.replace("VACANCY#", ""),
-      title: item.titulo || item.title,
-      company: item.company || "Empresa",
-      empresaUuid: item.empresaUuid || "",
-      lat: item.ubicacion?.lat || item.lat || 0,
-      lng: item.ubicacion?.lng || item.lng || 0,
-      modalidad: item.modalidad || "Presencial",
-      salario: item.salario || 0,
-      habilidadesRequeridas: item.habilidadesRequeridas || [],
-      descripcion: item.descripcion || "Sin descripción",
-      pdfUrl: item.pdfUrl || "",
-      createdAt: item.fechaCreacion || item.createdAt,
-    }));
+
+    const jobs = (result.Items || [])
+      .map((item) => ({
+        id: item.PK.replace("VACANCY#", ""),
+        title: item.titulo || item.title,
+        company: item.company || "Empresa",
+        empresaUuid: item.empresaUuid || "",
+        lat: item.ubicacion?.lat || item.lat || 0,
+        lng: item.ubicacion?.lng || item.lng || 0,
+        modalidad: item.modalidad || "Presencial",
+        salario: item.salario || 0,
+        habilidadesRequeridas: item.habilidadesRequeridas || [],
+        descripcion: item.descripcion || "Sin descripción",
+        pdfUrl: item.pdfUrl || "",
+        estado: item.estado || "Activa",
+        createdAt: item.fechaCreacion || item.createdAt,
+      }))
+      .filter((j) => {
+        // Hide logically deleted vacancies
+        if (j.estado === "CERRADA") return false;
+        // Hide vacancies from suspended companies
+        if (suspendedCompanies.has(j.empresaUuid)) return false;
+        return true;
+      });
+
     return {
       statusCode: 200,
       headers: {
@@ -162,6 +203,124 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
     const filename = query.filename || "file";
     const userId = query.userId || "anonymous";
 
+    // 1. Validation: Double extensions and dangerous files
+    const parts = filename.toLowerCase().split(".");
+    const dangerousExtensions = [
+      "exe",
+      "bat",
+      "cmd",
+      "sh",
+      "js",
+      "vbs",
+      "scr",
+      "msi",
+      "jar",
+      "com",
+      "pif",
+      "wsf",
+      "dll",
+      "sys",
+    ];
+    const knownExtensions = [
+      "pdf",
+      "png",
+      "jpg",
+      "jpeg",
+      "doc",
+      "docx",
+      "xls",
+      "xlsx",
+      "txt",
+      "zip",
+      "rar",
+      "exe",
+      "bat",
+      "cmd",
+      "sh",
+      "js",
+      "vbs",
+    ];
+
+    if (parts.length > 1) {
+      const finalExt = parts[parts.length - 1];
+      if (dangerousExtensions.includes(finalExt)) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error: "Extensión de archivo peligrosa no permitida.",
+          }),
+        };
+      }
+
+      if (parts.length > 2) {
+        for (let i = 1; i < parts.length - 1; i++) {
+          if (knownExtensions.includes(parts[i])) {
+            return {
+              statusCode: 400,
+              headers: {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Credentials": true,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                error:
+                  "Validación de doble extensión fallida. Nombre de archivo sospechoso (ej. cv.pdf.exe).",
+              }),
+            };
+          }
+        }
+      }
+    }
+
+    // 2. Validation: Strict 5MB size limit
+    const sizeParam = query.size;
+    if (!sizeParam) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "El tamaño del archivo (size) es requerido.",
+        }),
+      };
+    }
+
+    const size = parseInt(sizeParam, 10);
+    if (isNaN(size) || size <= 0) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "El tamaño del archivo debe ser un número válido mayor a 0.",
+        }),
+      };
+    }
+
+    const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+    if (size > MAX_SIZE) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "El archivo supera el límite de 5MB." }),
+      };
+    }
+
     // Clean spaces and special characters from filename
     const cleanFilename = filename.replace(/\s+/g, "_");
     const timestamp = Date.now();
@@ -171,6 +330,7 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
       Bucket: bucketName,
       Key: key,
       ContentType: query.contentType || undefined,
+      ContentLength: size,
     });
     const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     return {
@@ -302,6 +462,7 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       "lng",
       "location",
       "estado",
+      "apelacionComentarios",
     ];
 
     const expressionParts: string[] = [];

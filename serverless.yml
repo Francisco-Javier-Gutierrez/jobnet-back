@@ -107,6 +107,17 @@ functions:
     events:
       - websocket:
           route: $default
+  wsMessage:
+    handler: src/handlers/wsHandlers.sendMessage
+    events:
+      - websocket:
+          route: sendMessage
+  getChatMessages:
+    handler: src/handlers/wsHandlers.getChatMessages
+    events:
+      - httpApi:
+          path: /chats/{jobId}/{candidateId}/messages
+          method: get
   getProfile:
     handler: src/handlers/profile.getProfile
     events:
@@ -125,6 +136,54 @@ functions:
       - httpApi:
           path: /profiles
           method: get
+  getVerificationRequests:
+    handler: src/handlers/moderator.getVerificationRequests
+    events:
+      - httpApi:
+          path: /moderator/verifications
+          method: get
+  resolveVerification:
+    handler: src/handlers/moderator.resolveVerification
+    events:
+      - httpApi:
+          path: /moderator/verifications/{companyId}/resolve
+          method: post
+  getIncidents:
+    handler: src/handlers/moderator.getIncidents
+    events:
+      - httpApi:
+          path: /moderator/incidents
+          method: get
+  createIncident:
+    handler: src/handlers/moderator.createIncident
+    events:
+      - httpApi:
+          path: /moderator/incidents
+          method: post
+  resolveIncident:
+    handler: src/handlers/moderator.resolveIncident
+    events:
+      - httpApi:
+          path: /moderator/incidents/{incidentId}/resolve
+          method: post
+  getSuggestedSkills:
+    handler: src/handlers/moderator.getSuggestedSkills
+    events:
+      - httpApi:
+          path: /moderator/skills/suggestions
+          method: get
+  createSkillSuggestion:
+    handler: src/handlers/moderator.createSkillSuggestion
+    events:
+      - httpApi:
+          path: /moderator/skills/suggestions
+          method: post
+  resolveSkillSuggestion:
+    handler: src/handlers/moderator.resolveSkillSuggestion
+    events:
+      - httpApi:
+          path: /moderator/skills/suggestions/{id}/resolve
+          method: post
   getCatalog:
     handler: src/handlers/catalog.getCatalog
     events:

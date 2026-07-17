@@ -75,17 +75,20 @@ export const createCatalogItem: APIGatewayProxyHandler = async (event) => {
           "Access-Control-Allow-Credentials": true,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ error: "Missing required fields 'name' and 'category'" }),
+        body: JSON.stringify({
+          error: "Missing required fields 'name' and 'category'",
+        }),
       };
     }
 
     const itemId = id || Math.random().toString(36).substring(2, 9);
-    
+
     // Check duplicates
     const existing = await docClient.send(
       new ScanCommand({
         TableName: tableName,
-        FilterExpression: "SK = :sk AND category = :category AND valName = :valName",
+        FilterExpression:
+          "SK = :sk AND category = :category AND valName = :valName",
         ExpressionAttributeValues: {
           ":sk": "CATALOG",
           ":category": category,
@@ -102,7 +105,9 @@ export const createCatalogItem: APIGatewayProxyHandler = async (event) => {
           "Access-Control-Allow-Credentials": true,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ error: `Ya existe este ${category.toLowerCase()} en el catálogo` }),
+        body: JSON.stringify({
+          error: `Ya existe este ${category.toLowerCase()} en el catálogo`,
+        }),
       };
     }
 
@@ -205,7 +210,8 @@ export const updateCatalogItem: APIGatewayProxyHandler = async (event) => {
     const duplicate = await docClient.send(
       new ScanCommand({
         TableName: tableName,
-        FilterExpression: "SK = :sk AND category = :category AND valName = :valName AND PK <> :pk",
+        FilterExpression:
+          "SK = :sk AND category = :category AND valName = :valName AND PK <> :pk",
         ExpressionAttributeValues: {
           ":sk": "CATALOG",
           ":category": existingItem.category,
@@ -223,7 +229,9 @@ export const updateCatalogItem: APIGatewayProxyHandler = async (event) => {
           "Access-Control-Allow-Credentials": true,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ error: `Ya existe otro ${existingItem.category.toLowerCase()} con ese nombre` }),
+        body: JSON.stringify({
+          error: `Ya existe otro ${existingItem.category.toLowerCase()} con ese nombre`,
+        }),
       };
     }
 

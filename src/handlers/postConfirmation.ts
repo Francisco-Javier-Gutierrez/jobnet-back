@@ -70,7 +70,9 @@ export const handler: PostConfirmationTriggerHandler = async (
           GroupName: tipoUsuario,
         }),
       );
-      console.log(`Usuario asignado al grupo ${tipoUsuario} en UserPool ${userPoolId}`);
+      console.log(
+        `Usuario asignado al grupo ${tipoUsuario} en UserPool ${userPoolId}`,
+      );
     } catch (error: unknown) {
       // Ignoramos si el grupo no existe u ocurre otro error menor, pero lo logueamos
       console.error("Error asignando grupo en Cognito:", error);

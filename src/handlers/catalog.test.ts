@@ -101,7 +101,11 @@ describe("catalog handler", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // put success
 
       const event = {
-        body: JSON.stringify({ name: "React", category: "Habilidad", id: "react-1" }),
+        body: JSON.stringify({
+          name: "React",
+          category: "Habilidad",
+          id: "react-1",
+        }),
       } as APIGatewayProxyEvent;
 
       const response = await createCatalogItem(event, {} as any, () => {});

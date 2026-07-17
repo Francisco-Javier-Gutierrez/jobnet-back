@@ -7,6 +7,7 @@ import {
   UpdateCommand,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 
 const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -22,6 +23,18 @@ const dbClient = isOffline
   : new DynamoDBClient({});
 
 const docClient = DynamoDBDocumentClient.from(dbClient);
+
+const sesClient = isOffline
+  ? new SESClient({
+      endpoint: "http://localhost:4565",
+      region: "localhost",
+      credentials: {
+        accessKeyId: "local",
+        secretAccessKey: "local",
+      },
+    })
+  : new SESClient({});
+
 const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
 
 const VALID_STATUSES = [
@@ -245,7 +258,7 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
     }
 
     const body = JSON.parse(event.body || "{}");
-    const { status } = body;
+    const { status, motivoRechazo, detallesEntrevista } = body;
 
     if (!status || !VALID_STATUSES.includes(status)) {
       return {
@@ -286,11 +299,14 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
           PK: `JOB#${jobId}`,
           SK: `APP#${candidateId}`,
         },
-        UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
+        UpdateExpression:
+          "SET #status = :status, updatedAt = :updatedAt, motivoRechazo = :motivo, detallesEntrevista = :detalles",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
           ":status": status,
           ":updatedAt": updatedAt,
+          ":motivo": motivoRechazo || null,
+          ":detalles": detallesEntrevista || null,
         },
       }),
     );
@@ -303,14 +319,89 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
           PK: `USER#${candidateId}`,
           SK: `APP#${jobId}`,
         },
-        UpdateExpression: "SET #status = :status, updatedAt = :updatedAt",
+        UpdateExpression:
+          "SET #status = :status, updatedAt = :updatedAt, motivoRechazo = :motivo, detallesEntrevista = :detalles",
         ExpressionAttributeNames: { "#status": "status" },
         ExpressionAttributeValues: {
           ":status": status,
           ":updatedAt": updatedAt,
+          ":motivo": motivoRechazo || null,
+          ":detalles": detallesEntrevista || null,
         },
       }),
     );
+
+    // Fetch candidate profile to get email
+    const candidateProfile = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `USER#${candidateId}`,
+          SK: "PROFILE",
+        },
+      }),
+    );
+
+    // Fetch job details to get title
+    const jobDetail = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${jobId}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    const candidateEmail = candidateProfile.Item?.email;
+    const jobTitle =
+      jobDetail.Item?.titulo || jobDetail.Item?.title || "Vacante";
+    const companyName = jobDetail.Item?.company || "Empresa";
+
+    if (candidateEmail) {
+      if (status === "RECHAZADO") {
+        // Send rejection email (RF-43)
+        const reasonStr =
+          motivoRechazo || "No se especificó un motivo particular.";
+        await sesClient
+          .send(
+            new SendEmailCommand({
+              Source: "noreply@jobnet-platform.com",
+              Destination: { ToAddresses: [candidateEmail] },
+              Message: {
+                Subject: { Data: `Actualización de Postulación: ${jobTitle}` },
+                Body: {
+                  Text: {
+                    Data: `Hola,\n\nTe informamos que tu postulación para la vacante "${jobTitle}" en "${companyName}" ha sido descartada.\n\nMotivo del descarte:\n${reasonStr}\n\nAgradecemos mucho tu interés y participación en el proceso.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
+                  },
+                },
+              },
+            }),
+          )
+          .catch((err) => console.error("Error sending rejection email:", err));
+      } else if (status === "ENTREVISTA") {
+        // Send interview scheduling email (RF-44)
+        const detailsStr =
+          detallesEntrevista ||
+          "El equipo de reclutamiento se pondrá en contacto pronto para definir hora y canal.";
+        await sesClient
+          .send(
+            new SendEmailCommand({
+              Source: "noreply@jobnet-platform.com",
+              Destination: { ToAddresses: [candidateEmail] },
+              Message: {
+                Subject: { Data: `Invitación a Entrevista: ${jobTitle}` },
+                Body: {
+                  Text: {
+                    Data: `¡Felicidades!\n\nTu postulación para la vacante "${jobTitle}" en "${companyName}" ha avanzado a la fase de entrevistas.\n\nDetalles de la entrevista:\n${detailsStr}\n\nPor favor mantente al pendiente para más indicaciones.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
+                  },
+                },
+              },
+            }),
+          )
+          .catch((err) => console.error("Error sending interview email:", err));
+      }
+    }
 
     return {
       statusCode: 200,
