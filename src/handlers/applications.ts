@@ -116,6 +116,21 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       }),
     );
 
+    // Write initial chat message to the DynamoDB Chat table (so it matches Easy Apply flow)
+    const chatTimestamp = new Date().toISOString();
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `CHAT#${jobId}#${candidateId}`,
+          SK: `MSG#${chatTimestamp}`,
+          senderId: candidateId,
+          text: `Me he postulado a esta vacante. Adjunto mi CV: ${coverLetter || "No adjunto"}`,
+          createdAt: chatTimestamp,
+        },
+      }),
+    );
+
     return {
       statusCode: 201,
       headers,
