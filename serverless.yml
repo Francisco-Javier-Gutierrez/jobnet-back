@@ -118,6 +118,30 @@ functions:
       - httpApi:
           path: /chats/{jobId}/{candidateId}/messages
           method: get
+  getDisputeMessages:
+    handler: src/handlers/wsHandlers.getDisputeMessages
+    events:
+      - httpApi:
+          path: /disputes/{disputeId}/messages
+          method: get
+  getDisputes:
+    handler: src/handlers/moderator.getDisputes
+    events:
+      - httpApi:
+          path: /moderator/disputes
+          method: get
+  createDispute:
+    handler: src/handlers/moderator.createDispute
+    events:
+      - httpApi:
+          path: /moderator/disputes
+          method: post
+  resolveDispute:
+    handler: src/handlers/moderator.resolveDispute
+    events:
+      - httpApi:
+          path: /moderator/disputes/{disputeId}/resolve
+          method: post
   getProfile:
     handler: src/handlers/profile.getProfile
     events:

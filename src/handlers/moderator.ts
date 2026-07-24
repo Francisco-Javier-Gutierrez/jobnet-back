@@ -704,3 +704,218 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
     };
   }
 };
+
+export const getDisputes: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = event.queryStringParameters?.userId;
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk AND begins_with(PK, :prefix)",
+        ExpressionAttributeValues: {
+          ":sk": "METADATA",
+          ":prefix": "DISPUTE#",
+        },
+      }),
+    );
+
+    let disputes = (result.Items || []).map((item: any) => ({
+      id: item.PK.replace("DISPUTE#", ""),
+      jobId: item.jobId || "",
+      jobTitle: item.jobTitle || "Vacante",
+      candidateId: item.candidateId || "",
+      companyId: item.companyId || "",
+      complainantId: item.complainantId || "",
+      complainantRole: item.complainantRole || "CANDIDATO",
+      complainantName: item.complainantName || "Usuario",
+      reason: item.reason || "",
+      description: item.description || "",
+      attachments: item.attachments || [],
+      estatus: item.estatus || "ABIERTA",
+      fechaCreacion: item.fechaCreacion || "",
+      fechaResolucion: item.fechaResolucion || null,
+      notes: item.notes || "",
+    }));
+
+    if (userId) {
+      disputes = disputes.filter(
+        (d) =>
+          d.candidateId === userId ||
+          d.companyId === userId ||
+          d.complainantId === userId,
+      );
+    }
+
+    disputes.sort((a, b) => b.fechaCreacion.localeCompare(a.fechaCreacion));
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(disputes),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const createDispute: APIGatewayProxyHandler = async (event) => {
+  try {
+    const body = JSON.parse(event.body || "{}");
+    const {
+      jobId,
+      jobTitle,
+      candidateId,
+      companyId,
+      complainantId,
+      complainantRole,
+      complainantName,
+      reason,
+      description,
+      attachments,
+    } = body;
+
+    if (!reason || !complainantId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "Missing required fields 'reason' or 'complainantId'",
+        }),
+      };
+    }
+
+    const disputeId = Math.random().toString(36).substring(2, 15);
+    const createdAt = new Date().toISOString();
+
+    const disputeItem: any = {
+      PK: `DISPUTE#${disputeId}`,
+      SK: "METADATA",
+      jobId: jobId || "",
+      jobTitle: jobTitle || "",
+      candidateId: candidateId || "",
+      companyId: companyId || "",
+      complainantId,
+      complainantRole: complainantRole || "CANDIDATO",
+      complainantName: complainantName || "Usuario",
+      reason,
+      description: description || "",
+      attachments: attachments || [],
+      estatus: "ABIERTA",
+      fechaCreacion: createdAt,
+    };
+
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: disputeItem,
+      }),
+    );
+
+    // Initial system message in dispute chat thread
+    const msgTimestamp = new Date().toISOString();
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `DISPUTE#${disputeId}`,
+          SK: `MSG#${msgTimestamp}`,
+          disputeId,
+          senderId: complainantId,
+          text: `Reclamo Abierto: ${reason}. ${description ? "Detalle: " + description : ""}`,
+          createdAt: msgTimestamp,
+        },
+      }),
+    );
+
+    return {
+      statusCode: 201,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        id: disputeId,
+        ...disputeItem,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const resolveDispute: APIGatewayProxyHandler = async (event) => {
+  try {
+    const disputeId = event.pathParameters?.disputeId;
+    if (!disputeId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "Missing path parameter 'disputeId'" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const { action, notes } = body;
+
+    if (!action || !["resolve", "reject", "in_review"].includes(action)) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Invalid or missing body parameter 'action'. Must be 'resolve', 'reject' or 'in_review'",
+        }),
+      };
+    }
+
+    const newStatus =
+      action === "resolve"
+        ? "RESUELTA"
+        : action === "reject"
+          ? "RECHAZADA"
+          : "EN_REVISION";
+
+    const resolvedAt = new Date().toISOString();
+
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: {
+          PK: `DISPUTE#${disputeId}`,
+          SK: "METADATA",
+        },
+        UpdateExpression:
+          "SET estatus = :st, notes = :notes, fechaResolucion = :fr",
+        ExpressionAttributeValues: {
+          ":st": newStatus,
+          ":notes": notes || "",
+          ":fr": resolvedAt,
+        },
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        disputeId,
+        estatus: newStatus,
+        notes: notes || "",
+        fechaResolucion: resolvedAt,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};

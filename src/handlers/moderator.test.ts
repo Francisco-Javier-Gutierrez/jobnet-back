@@ -9,6 +9,9 @@ import {
   getSuggestedSkills,
   createSkillSuggestion,
   resolveSkillSuggestion,
+  getDisputes,
+  createDispute,
+  resolveDispute,
 } from "./moderator";
 
 const { mockDynamoSend } = vi.hoisted(() => {
@@ -685,6 +688,66 @@ describe("moderator handler", () => {
       const response = await resolveSkillSuggestion(event, {} as any, () => {});
       expect(response.statusCode).toBe(500);
       expect(JSON.parse(response.body).error).toBe("DB error");
+    });
+  });
+
+  describe("disputes handlers", () => {
+    it("should fetch disputes successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "DISPUTE#disp-1",
+            SK: "METADATA",
+            reason: "Non-responsive company",
+            estatus: "ABIERTA",
+            fechaCreacion: "2026-07-24T12:00:00Z",
+          },
+        ],
+      });
+
+      const event = { queryStringParameters: {} } as any;
+      const response = await getDisputes(event, {} as any, () => {});
+      expect(response.statusCode).toBe(200);
+
+      const body = JSON.parse(response.body);
+      expect(body).toHaveLength(1);
+      expect(body[0].reason).toBe("Non-responsive company");
+    });
+
+    it("should create dispute successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({}); // Put metadata
+      mockDynamoSend.mockResolvedValueOnce({}); // Put initial msg
+
+      const event = {
+        body: JSON.stringify({
+          jobId: "job-1",
+          complainantId: "cand-1",
+          reason: "Offer terms modified unexpectedly",
+        }),
+      } as any;
+
+      const response = await createDispute(event, {} as any, () => {});
+      expect(response.statusCode).toBe(201);
+      expect(JSON.parse(response.body).success).toBe(true);
+    });
+
+    it("should return 400 when missing required fields in createDispute", async () => {
+      const event = { body: JSON.stringify({}) } as any;
+      const response = await createDispute(event, {} as any, () => {});
+      expect(response.statusCode).toBe(400);
+    });
+
+    it("should resolve dispute successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand
+
+      const event = {
+        pathParameters: { disputeId: "disp-1" },
+        body: JSON.stringify({ action: "resolve", notes: "Reviewed and settled" }),
+      } as any;
+
+      const response = await resolveDispute(event, {} as any, () => {});
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body).estatus).toBe("RESUELTA");
     });
   });
 });

@@ -79,6 +79,7 @@ describe("applications handler", () => {
     it("should return 201 on successful application", async () => {
       mockDynamoSend.mockResolvedValueOnce({}); // PutCommand for JOB# item
       mockDynamoSend.mockResolvedValueOnce({}); // PutCommand for USER# item
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand for CHAT# item
 
       const event = {
         pathParameters: { id: "job-1" },
@@ -96,10 +97,11 @@ describe("applications handler", () => {
       expect(body.status).toBe("PENDIENTE");
       expect(body.coverLetter).toBe("I am interested");
       expect(body.appliedAt).toBeDefined();
-      expect(mockDynamoSend).toHaveBeenCalledTimes(2);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(3);
     });
 
     it("should return 201 with null coverLetter when not provided", async () => {
+      mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
 
