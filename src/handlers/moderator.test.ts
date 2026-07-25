@@ -296,6 +296,7 @@ describe("moderator handler", () => {
 
     it("should create incident successfully", async () => {
       mockDynamoSend.mockResolvedValueOnce({}); // PutCommand success
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // ScanCommand success for reports count
 
       const event = {
         body: JSON.stringify({
@@ -320,6 +321,31 @@ describe("moderator handler", () => {
       expect(res.severity).toBe("media");
       expect(res.infraccion).toBe("contenido");
       expect(res.estatus).toBe("PENDIENTE");
+    });
+
+    it("should trigger automatic vacancy evaluation (RF-72) when 5 or more reports accumulate in less than 12 hours", async () => {
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand success for new incident
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: Array(5).fill({ PK: "INCIDENT#1", SK: "METADATA" }),
+      }); // ScanCommand returns 5 incidents
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand success setting EVALUACION
+
+      const event = {
+        body: JSON.stringify({
+          jobId: "job-fraud-123",
+          jobTitle: "Fake Offer",
+          reporter: "victim@test.com",
+          reason: "Scam",
+        }),
+      } as any;
+
+      const response = await createIncident(event, {} as any, () => {});
+      expect(response.statusCode).toBe(201);
+
+      const res = JSON.parse(response.body);
+      expect(res.success).toBe(true);
+      expect(res.autoSuspended).toBe(true);
+      expect(res.incidentCount).toBe(5);
     });
 
     it("should return 500 on database error during create", async () => {

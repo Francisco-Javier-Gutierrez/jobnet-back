@@ -238,12 +238,67 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
       }),
     );
 
+    // RF-72: Flag de Suspensión por Denuncias
+    // Si una vacante acumula 5 o más reportes independientes en menos de 12 horas,
+    // se activa automáticamente la bandera de "Revisión Obligatoria" y estado "EVALUACION".
+    let autoSuspended = false;
+    let incidentCount = 1;
+
+    if (jobId) {
+      const twelveHoursAgo = new Date(
+        Date.now() - 12 * 60 * 60 * 1000,
+      ).toISOString();
+
+      const existingReportsResult = await docClient.send(
+        new ScanCommand({
+          TableName: tableName,
+          FilterExpression:
+            "SK = :sk AND begins_with(PK, :prefix) AND jobId = :jobId AND fechaCreacion >= :twelveHoursAgo",
+          ExpressionAttributeValues: {
+            ":sk": "METADATA",
+            ":prefix": "INCIDENT#",
+            ":jobId": jobId,
+            ":twelveHoursAgo": twelveHoursAgo,
+          },
+        }),
+      );
+
+      incidentCount = (existingReportsResult.Items || []).length;
+
+      if (incidentCount >= 5) {
+        autoSuspended = true;
+        const graceLimit = new Date();
+        graceLimit.setDate(graceLimit.getDate() + 15);
+
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: {
+              PK: `VACANCY#${jobId}`,
+              SK: "METADATA",
+            },
+            UpdateExpression:
+              "SET estado = :evalState, banderaRevisionObligatoria = :flag, fechaLimiteApelacion = :grace, motivoSuspensionAutomatica = :reason",
+            ExpressionAttributeValues: {
+              ":evalState": "EVALUACION",
+              ":flag": true,
+              ":grace": graceLimit.toISOString(),
+              ":reason":
+                "Suspensión automática por acumulación de 5 o más denuncias en menos de 12 horas (RF-72)",
+            },
+          }),
+        );
+      }
+    }
+
     return {
       statusCode: 201,
       headers,
       body: JSON.stringify({
         success: true,
         id: uuid,
+        autoSuspended,
+        incidentCount,
         ...cleanItem,
       }),
     };
