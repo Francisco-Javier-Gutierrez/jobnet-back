@@ -29,6 +29,7 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
     }),
   },
   PutCommand: class {},
+  GetCommand: class {},
 }));
 
 import { handler } from "./postConfirmation";
@@ -92,6 +93,21 @@ describe("postConfirmation handler", () => {
     await handler(event, {} as never, () => {});
     expect(mockCognitoSend).toHaveBeenCalled();
     expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should block EMPRESA signup if corporate domain is suspended (RF-74)", async () => {
+    mockDynamoSend.mockResolvedValueOnce({
+      Item: {
+        PK: "BLOCKED_DOMAIN#fraudcorp.com",
+        domain: "fraudcorp.com",
+        reason: "Prácticas fraudulentas",
+      },
+    }); // GetCommand returns blocked domain
+
+    const event = createEvent("EMPRESA", "Fraud Corp");
+    event.request.userAttributes.email = "recruiter@fraudcorp.com";
+
+    await expect(handler(event, {} as never, () => {})).rejects.toThrow(/RF-74/);
   });
 
   it("should process ADMIN user correctly", async () => {

@@ -3,7 +3,7 @@ import {
   PostConfirmationTriggerHandler,
 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import {
   CognitoIdentityProviderClient,
   AdminAddUserToGroupCommand,
@@ -118,7 +118,34 @@ export const handler: PostConfirmationTriggerHandler = async (
     });
   }
 
-  // 4. Guardar en DynamoDB
+  // 4. RF-74: Restricción de Registro por Dominios Bloqueados
+  if (tipoUsuario === "EMPRESA" && email && email.includes("@")) {
+    const domain = email.split("@")[1].toLowerCase().trim();
+    const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+    try {
+      const blockedRes = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            PK: `BLOCKED_DOMAIN#${domain}`,
+            SK: "METADATA",
+          },
+        }),
+      );
+      if (blockedRes.Item) {
+        throw new Error(
+          `El dominio corporativo @${domain} ha sido suspendido definitivamente por prácticas fraudulentas o suplantación de identidad (RF-74).`,
+        );
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes("RF-74")) {
+        console.error("Registro bloqueado por RF-74:", err.message);
+        throw err;
+      }
+    }
+  }
+
+  // 5. Guardar en DynamoDB
   if (process.env.DYNAMODB_TABLE) {
     try {
       await docClient.send(

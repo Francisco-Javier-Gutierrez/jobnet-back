@@ -13,6 +13,7 @@ import {
   createDispute,
   resolveDispute,
   getAuditLogs,
+  getBlockedDomains,
 } from "./moderator";
 
 const { mockDynamoSend } = vi.hoisted(() => {
@@ -815,6 +816,37 @@ describe("moderator handler", () => {
       const response = await getAuditLogs({} as any, {} as any, () => {});
       expect(response.statusCode).toBe(500);
       expect(JSON.parse(response.body).error).toBe("DB audit error");
+    });
+  });
+
+  describe("getBlockedDomains", () => {
+    it("should fetch blocked domains successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "BLOCKED_DOMAIN#scam.com",
+            SK: "METADATA",
+            domain: "scam.com",
+            blockedAt: "2026-07-24T18:00:00.000Z",
+            reason: "Phishing site",
+          },
+        ],
+      });
+
+      const response = await getBlockedDomains({} as any, {} as any, () => {});
+      expect(response.statusCode).toBe(200);
+
+      const domains = JSON.parse(response.body);
+      expect(domains).toHaveLength(1);
+      expect(domains[0].domain).toBe("scam.com");
+      expect(domains[0].reason).toBe("Phishing site");
+    });
+
+    it("should return 500 on database error in getBlockedDomains", async () => {
+      mockDynamoSend.mockRejectedValueOnce(new Error("DB domain error"));
+      const response = await getBlockedDomains({} as any, {} as any, () => {});
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe("DB domain error");
     });
   });
 });

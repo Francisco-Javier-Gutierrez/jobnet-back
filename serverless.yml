@@ -148,6 +148,12 @@ functions:
       - httpApi:
           path: /moderator/audit-logs
           method: get
+  getBlockedDomains:
+    handler: src/handlers/moderator.getBlockedDomains
+    events:
+      - httpApi:
+          path: /moderator/blocked-domains
+          method: get
   getProfile:
     handler: src/handlers/profile.getProfile
     events:

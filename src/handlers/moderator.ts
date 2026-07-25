@@ -445,6 +445,38 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             },
           }),
         );
+
+        // RF-74: Extraer correo de la empresa y bloquear dominio corporativo si aplica
+        try {
+          const vacancyRes = await docClient.send(
+            new GetCommand({
+              TableName: tableName,
+              Key: {
+                PK: `VACANCY#${incident.jobId}`,
+                SK: "METADATA",
+              },
+            }),
+          );
+
+          if (vacancyRes.Item && vacancyRes.Item.empresaUuid) {
+            const compProfileRes = await docClient.send(
+              new GetCommand({
+                TableName: tableName,
+                Key: {
+                  PK: `USER#${vacancyRes.Item.empresaUuid}`,
+                  SK: "PROFILE",
+                },
+              }),
+            );
+
+            if (compProfileRes.Item && compProfileRes.Item.email && compProfileRes.Item.email.includes("@")) {
+              const compDomain = compProfileRes.Item.email.split("@")[1];
+              await blockCorporateDomain(compDomain, incident.reason || "Suspensión por vacante fraudulenta", vacancyRes.Item.empresaUuid);
+            }
+          }
+        } catch (e) {
+          console.error("Error auto-blocking corporate domain on incident resolve:", e);
+        }
       } else if (action === "evaluate") {
         // Pause vacancy for evaluation (Fase 1: Notificación y pausa)
         const graceLimit = new Date();
@@ -1063,6 +1095,83 @@ export const getAuditLogs: APIGatewayProxyHandler = async () => {
       statusCode: 200,
       headers,
       body: JSON.stringify(logs),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export async function blockCorporateDomain(
+  domain: string,
+  reason: string,
+  companyId?: string,
+) {
+  if (
+    !domain ||
+    domain.includes("gmail.com") ||
+    domain.includes("outlook.com") ||
+    domain.includes("hotmail.com") ||
+    domain.includes("yahoo.com")
+  ) {
+    return; // Do not block public provider email domains
+  }
+
+  const cleanDomain = domain.toLowerCase().trim();
+  const timestamp = new Date().toISOString();
+
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        PK: `BLOCKED_DOMAIN#${cleanDomain}`,
+        SK: "METADATA",
+        domain: cleanDomain,
+        blockedAt: timestamp,
+        reason:
+          reason || "Suspensión por prácticas fraudulentas o suplantación (RF-74)",
+        companyId: companyId || "",
+      },
+    }),
+  );
+
+  // RF-73: Audit log entry
+  await saveAuditLog({
+    targetId: cleanDomain,
+    targetType: "EMPRESA",
+    action: "BLOQUEO_DOMINIO_CORPORATIVO_RF74",
+    reason: `Dominio @${cleanDomain} bloqueado: ${reason}`,
+    executorId: "MODERADOR",
+  });
+}
+
+export const getBlockedDomains: APIGatewayProxyHandler = async () => {
+  try {
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk AND begins_with(PK, :prefix)",
+        ExpressionAttributeValues: {
+          ":sk": "METADATA",
+          ":prefix": "BLOCKED_DOMAIN#",
+        },
+      }),
+    );
+
+    const domains = (result.Items || []).map((item: any) => ({
+      domain: item.domain || item.PK.replace("BLOCKED_DOMAIN#", ""),
+      blockedAt: item.blockedAt || "",
+      reason: item.reason || "",
+      companyId: item.companyId || "",
+    }));
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(domains),
     };
   } catch (error: unknown) {
     return {
