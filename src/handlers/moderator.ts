@@ -43,6 +43,45 @@ const headers = {
   "Content-Type": "application/json",
 };
 
+export interface AuditLogParams {
+  targetId: string;
+  targetType: "EMPRESA" | "VACANTE" | "CANDIDATO";
+  action: string;
+  reason: string;
+  executorId?: string;
+}
+
+export async function saveAuditLog(params: AuditLogParams) {
+  const auditId = Math.random().toString(36).substring(2, 15);
+  const now = new Date();
+  const timestamp = now.toISOString();
+  const fecha = timestamp.split("T")[0];
+  const hora = now.toTimeString().split(" ")[0];
+
+  const auditItem = {
+    PK: `AUDIT#${auditId}`,
+    SK: "METADATA",
+    auditId,
+    targetId: params.targetId,
+    targetType: params.targetType,
+    action: params.action,
+    reason: params.reason,
+    executorId: params.executorId || "MODERATOR_SYSTEM",
+    timestamp,
+    fecha,
+    hora,
+  };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: auditItem,
+    }),
+  );
+
+  return auditItem;
+}
+
 export const getVerificationRequests: APIGatewayProxyHandler = async () => {
   try {
     const result = await docClient.send(
@@ -288,6 +327,15 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
             },
           }),
         );
+
+        // RF-73: Registra auditoría automática
+        await saveAuditLog({
+          targetId: jobId,
+          targetType: "VACANTE",
+          action: "SUSPENSION_AUTOMATICA_RF72",
+          reason: "Acumulación de 5 o más denuncias en menos de 12 horas (RF-72)",
+          executorId: "SISTEMA_AUTOGUARDIA",
+        });
       }
     }
 
@@ -955,6 +1003,15 @@ export const resolveDispute: APIGatewayProxyHandler = async (event) => {
       }),
     );
 
+    // RF-73: Registra auditoría de resolución de disputa
+    await saveAuditLog({
+      targetId: disputeId,
+      targetType: "VACANTE",
+      action: `RESOLUCION_DISPUTA_${newStatus}`,
+      reason: notes || `Dictamen de disputa actualizado a ${newStatus}`,
+      executorId: "MODERADOR",
+    });
+
     return {
       statusCode: 200,
       headers,
@@ -965,6 +1022,47 @@ export const resolveDispute: APIGatewayProxyHandler = async (event) => {
         notes: notes || "",
         fechaResolucion: resolvedAt,
       }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const getAuditLogs: APIGatewayProxyHandler = async () => {
+  try {
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk AND begins_with(PK, :prefix)",
+        ExpressionAttributeValues: {
+          ":sk": "METADATA",
+          ":prefix": "AUDIT#",
+        },
+      }),
+    );
+
+    const logs = (result.Items || [])
+      .map((item: any) => ({
+        id: item.auditId || item.PK.replace("AUDIT#", ""),
+        targetId: item.targetId || "",
+        targetType: item.targetType || "VACANTE",
+        action: item.action || "",
+        reason: item.reason || "",
+        executorId: item.executorId || "SISTEMA",
+        timestamp: item.timestamp || "",
+        fecha: item.fecha || "",
+        hora: item.hora || "",
+      }))
+      .sort((a: any, b: any) => b.timestamp.localeCompare(a.timestamp));
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(logs),
     };
   } catch (error: unknown) {
     return {

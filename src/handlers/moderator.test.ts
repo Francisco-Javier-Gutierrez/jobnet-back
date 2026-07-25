@@ -12,6 +12,7 @@ import {
   getDisputes,
   createDispute,
   resolveDispute,
+  getAuditLogs,
 } from "./moderator";
 
 const { mockDynamoSend } = vi.hoisted(() => {
@@ -329,6 +330,7 @@ describe("moderator handler", () => {
         Items: Array(5).fill({ PK: "INCIDENT#1", SK: "METADATA" }),
       }); // ScanCommand returns 5 incidents
       mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand success setting EVALUACION
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand success for saveAuditLog
 
       const event = {
         body: JSON.stringify({
@@ -765,6 +767,7 @@ describe("moderator handler", () => {
 
     it("should resolve dispute successfully", async () => {
       mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand for audit log
 
       const event = {
         pathParameters: { disputeId: "disp-1" },
@@ -774,6 +777,44 @@ describe("moderator handler", () => {
       const response = await resolveDispute(event, {} as any, () => {});
       expect(response.statusCode).toBe(200);
       expect(JSON.parse(response.body).estatus).toBe("RESUELTA");
+    });
+  });
+
+  describe("getAuditLogs", () => {
+    it("should fetch audit logs successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "AUDIT#aud-1",
+            SK: "METADATA",
+            auditId: "aud-1",
+            targetId: "job-100",
+            targetType: "VACANTE",
+            action: "SUSPENSION_AUTOMATICA_RF72",
+            reason: "Acumulación de 5 reportes",
+            executorId: "SISTEMA_AUTOGUARDIA",
+            timestamp: "2026-07-24T18:00:00.000Z",
+            fecha: "2026-07-24",
+            hora: "18:00:00",
+          },
+        ],
+      });
+
+      const response = await getAuditLogs({} as any, {} as any, () => {});
+      expect(response.statusCode).toBe(200);
+
+      const logs = JSON.parse(response.body);
+      expect(logs).toHaveLength(1);
+      expect(logs[0].id).toBe("aud-1");
+      expect(logs[0].targetId).toBe("job-100");
+      expect(logs[0].action).toBe("SUSPENSION_AUTOMATICA_RF72");
+    });
+
+    it("should return 500 on database error in getAuditLogs", async () => {
+      mockDynamoSend.mockRejectedValueOnce(new Error("DB audit error"));
+      const response = await getAuditLogs({} as any, {} as any, () => {});
+      expect(response.statusCode).toBe(500);
+      expect(JSON.parse(response.body).error).toBe("DB audit error");
     });
   });
 });

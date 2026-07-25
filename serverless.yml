@@ -142,6 +142,12 @@ functions:
       - httpApi:
           path: /moderator/disputes/{disputeId}/resolve
           method: post
+  getAuditLogs:
+    handler: src/handlers/moderator.getAuditLogs
+    events:
+      - httpApi:
+          path: /moderator/audit-logs
+          method: get
   getProfile:
     handler: src/handlers/profile.getProfile
     events:
