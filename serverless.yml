@@ -2,17 +2,35 @@ service: jobnet-back
 
 provider:
   name: aws
-  runtime: nodejs18.x
-  stage: ${opt:stage, 'dev'}
+  runtime: nodejs20.x
+  stage: ${opt:stage, 'prod'}
   region: us-east-1
   httpApi:
-    cors: true
+    cors:
+      allowedOrigins:
+        - "https://dsty3j5u0b31g.cloudfront.net"
+        - "http://localhost:3000"
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+        - X-Amz-Date
+        - X-Api-Key
+        - X-Amz-Security-Token
+        - X-Amz-User-Agent
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      allowCredentials: true
+      maxAge: 3600
   environment:
     DYNAMODB_TABLE: jobnet-jobs-${self:provider.stage}
     S3_UPLOAD_BUCKET: jobnet-uploads-${self:provider.stage}
-    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, 'us-east-1_local'}
-    OPENSEARCH_ENDPOINT: ${env:OPENSEARCH_ENDPOINT, 'localhost:9200'}
-
+    COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, 'us-east-1_trquL61F2'}
+    COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, '4ef8k4tofjj4ounvo8nf7d9pep'}
+    OPENSEARCH_ENDPOINT: ${env:OPENSEARCH_ENDPOINT, 'search-jobnet-search-prod-72yps4fybyd5lt66x4oxdayx2e.us-east-1.es.amazonaws.com'}
   iam:
     role:
       statements:
@@ -24,7 +42,9 @@ provider:
             - dynamodb:DeleteItem
             - dynamodb:Query
             - dynamodb:Scan
-          Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
+          Resource:
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}/index/*"
         - Effect: Allow
           Action:
             - cognito-idp:AdminAddUserToGroup
@@ -36,6 +56,9 @@ provider:
             - s3:PutObjectAcl
           Resource: "arn:aws:s3:::${self:provider.environment.S3_UPLOAD_BUCKET}/*"
 
+package:
+  individually: false
+
 plugins:
   - serverless-esbuild
   - serverless-offline
@@ -46,8 +69,9 @@ custom:
     minify: false
     sourcemap: true
     exclude: []
-    target: node18
+    target: node20
     platform: node
+    concurrency: 1
 
   serverless-offline:
     httpPort: 3001
@@ -67,6 +91,12 @@ functions:
     events:
       - httpApi:
           path: /jobs
+          method: get
+  getJobById:
+    handler: src/handlers/jobs.getJobById
+    events:
+      - httpApi:
+          path: /jobs/{id}
           method: get
   createJob:
     handler: src/handlers/jobs.createJob
@@ -183,6 +213,42 @@ functions:
     events:
       - httpApi:
           path: /moderator/verifications/{companyId}/resolve
+          method: post
+  initiateSuspension:
+    handler: src/handlers/moderator.initiateSuspension
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/initiate-suspension
+          method: post
+  cancelSuspension:
+    handler: src/handlers/moderator.cancelSuspension
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/cancel-suspension
+          method: post
+  confirmSuspension:
+    handler: src/handlers/moderator.confirmSuspension
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/confirm-suspension
+          method: post
+  getSuspensionStatus:
+    handler: src/handlers/moderator.getSuspensionStatus
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/suspension-status
+          method: get
+  getAppealMessages:
+    handler: src/handlers/wsHandlers.getAppealMessages
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/appeal-messages
+          method: get
+  joinAppeal:
+    handler: src/handlers/moderator.joinAppeal
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/join-appeal
           method: post
   getIncidents:
     handler: src/handlers/moderator.getIncidents

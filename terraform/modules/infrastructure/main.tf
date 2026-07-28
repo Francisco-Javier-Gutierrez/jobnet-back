@@ -99,8 +99,8 @@ resource "aws_cognito_user_group" "group_candidato" {
   user_pool_id = aws_cognito_user_pool.pool.id
 }
 
-resource "aws_cognito_user_group" "group_empresa" {
-  name         = "EMPRESA"
+resource "aws_cognito_user_group" "group_organizacion" {
+  name         = "ORGANIZACION"
   user_pool_id = aws_cognito_user_pool.pool.id
 }
 
@@ -128,6 +128,23 @@ resource "aws_dynamodb_table" "jobs" {
   attribute {
     name = "SK"
     type = "S"
+  }
+
+  attribute {
+    name = "GSI1PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "GSI1SK"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "GSI1"
+    hash_key        = "GSI1PK"
+    range_key       = "GSI1SK"
+    projection_type = "ALL"
   }
 }
 
@@ -172,28 +189,35 @@ resource "aws_s3_bucket_policy" "uploads_policy" {
   })
 }
 
-# resource "aws_opensearch_domain" "search" {
-#   domain_name    = "jobnet-search-${var.environment}"
-#   engine_version = "OpenSearch_2.11"
-# 
-#   cluster_config {
-#     instance_type = "t3.small.search"
-#   }
-# 
-#   ebs_options {
-#     ebs_enabled = true
-#     volume_size = 10
-#   }
-# 
-#   access_policies = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [
-#       {
-#         Effect    = "Allow"
-#         Principal = "*"
-#         Action    = "es:*"
-#         Resource  = "arn:aws:es:us-east-1:${data.aws_caller_identity.current.account_id}:domain/jobnet-search-${var.environment}/*"
-#       }
-#     ]
-#   })
-# }
+resource "aws_opensearch_domain" "search" {
+  domain_name    = "jobnet-search-${var.environment}"
+  engine_version = "OpenSearch_2.11"
+
+  cluster_config {
+    instance_type = "t3.small.search"
+  }
+
+  ebs_options {
+    ebs_enabled = true
+    volume_size = 10
+  }
+
+  access_policies = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action    = "es:*"
+        Resource  = "arn:aws:es:us-east-1:${data.aws_caller_identity.current.account_id}:domain/jobnet-search-${var.environment}/*"
+        Condition = {
+          StringEquals = {
+            "aws:PrincipalAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
+}

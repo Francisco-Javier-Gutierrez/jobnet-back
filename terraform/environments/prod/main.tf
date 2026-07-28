@@ -6,10 +6,23 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  # Remote backend template (terraform-architect standard)
+  # backend "s3" {
+  #   bucket         = "jobnet-terraform-state-prod"
+  #   key            = "prod/terraform.tfstate"
+  #   region         = "us-east-1"
+  #   dynamodb_table = "jobnet-terraform-locks"
+  #   encrypt        = true
+  # }
 }
 
 provider "aws" {
   region = "us-east-1"
+
+  ignore_tags {
+    keys = ["Environment", "ManagedBy", "Project"]
+  }
 }
 
 module "infrastructure" {

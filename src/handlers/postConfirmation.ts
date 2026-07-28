@@ -3,7 +3,11 @@ import {
   PostConfirmationTriggerHandler,
 } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  GetCommand,
+} from "@aws-sdk/lib-dynamodb";
 import {
   CognitoIdentityProviderClient,
   AdminAddUserToGroupCommand,
@@ -40,28 +44,41 @@ export const handler: PostConfirmationTriggerHandler = async (
 
   const rawRole =
     event.request.clientMetadata?.tipoUsuario ||
+    event.request.clientMetadata?.role ||
     userAttributes["custom:tipoUsuario"] ||
     userAttributes["custom:role"] ||
-    "CANDIDATO";
+    "";
 
-  let tipoUsuario = "CANDIDATO";
-  const normalizedRole = rawRole.toLowerCase();
+  let tipoUsuario: string;
+  const normalizedRole = rawRole.toLowerCase().trim();
   if (normalizedRole === "admin") {
     tipoUsuario = "ADMIN";
   } else if (normalizedRole === "moderator") {
     tipoUsuario = "MODERATOR";
-  } else if (normalizedRole === "company" || normalizedRole === "empresa") {
-    tipoUsuario = "EMPRESA";
+  } else if (
+    normalizedRole === "company" ||
+    normalizedRole === "empresa" ||
+    normalizedRole === "organization" ||
+    normalizedRole === "organizacion"
+  ) {
+    tipoUsuario = "ORGANIZACION";
   } else if (normalizedRole === "candidate" || normalizedRole === "candidato") {
     tipoUsuario = "CANDIDATO";
+  } else {
+    // Default fallback for blank, unassigned, none or missing role
+    tipoUsuario = "PENDIENTE";
   }
 
   const nombre =
     event.request.clientMetadata?.nombre || userAttributes.name || "Sin Nombre";
 
-  // 1. Asignar el usuario al grupo de Cognito
+  // 1. Asignar el usuario al grupo de Cognito (se omite si es usuario PENDIENTE/blank)
   const userPoolId = event.userPoolId || process.env.COGNITO_USER_POOL_ID;
-  if (userPoolId && userPoolId !== "us-east-1_local") {
+  if (
+    userPoolId &&
+    userPoolId !== "us-east-1_local" &&
+    tipoUsuario !== "PENDIENTE"
+  ) {
     try {
       await cognitoClient.send(
         new AdminAddUserToGroupCommand({
@@ -74,7 +91,6 @@ export const handler: PostConfirmationTriggerHandler = async (
         `Usuario asignado al grupo ${tipoUsuario} en UserPool ${userPoolId}`,
       );
     } catch (error: unknown) {
-      // Ignoramos si el grupo no existe u ocurre otro error menor, pero lo logueamos
       console.error("Error asignando grupo en Cognito:", error);
     }
   }
@@ -86,19 +102,24 @@ export const handler: PostConfirmationTriggerHandler = async (
     tipoUsuario,
     email,
     nombre,
-    estadoCuenta: "ACTIVO",
+    estadoCuenta: tipoUsuario === "PENDIENTE" ? "PENDIENTE_ROL" : "ACTIVO",
     fechaCreacion: new Date().toISOString(),
   };
 
   // 3. Completar con atributos específicos según el rol
   const userItem = { ...baseUser };
 
-  if (tipoUsuario === "ADMIN") {
+  if (tipoUsuario === "PENDIENTE") {
+    Object.assign(userItem, {
+      fotoPerfil: "",
+      biografia:
+        "Usuario sin rol asignado. Pendiente de asignación manual de grupo Cognito por un Administrador.",
+    });
+  } else if (tipoUsuario === "ADMIN") {
     // Nada más que agregar
   } else if (tipoUsuario === "MODERATOR") {
-    // Solo un ejemplo si tuviéramos que forzar un nombre
     userItem.nombre = nombre;
-  } else if (tipoUsuario === "EMPRESA") {
+  } else if (tipoUsuario === "ORGANIZACION") {
     Object.assign(userItem, {
       taxId: userAttributes["custom:tax_id"] || "",
       fotoPerfil: "",
@@ -119,7 +140,7 @@ export const handler: PostConfirmationTriggerHandler = async (
   }
 
   // 4. RF-74: Restricción de Registro por Dominios Bloqueados
-  if (tipoUsuario === "EMPRESA" && email && email.includes("@")) {
+  if (tipoUsuario === "ORGANIZACION" && email && email.includes("@")) {
     const domain = email.split("@")[1].toLowerCase().trim();
     const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
     try {

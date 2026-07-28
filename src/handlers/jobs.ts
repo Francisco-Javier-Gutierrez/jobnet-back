@@ -6,6 +6,7 @@ import {
   PutCommand,
   GetCommand,
   UpdateCommand,
+  QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -52,73 +53,107 @@ const sesClient = isOffline
 const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
 const bucketName = process.env.S3_UPLOAD_BUCKET || "jobnet-uploads-dev";
 
-export const getJobs: APIGatewayProxyHandler = async () => {
+import { searchOpenSearchOrFallback } from "../utils/openSearchClient";
+import { enrichJobItem } from "../utils/dtoEnricher";
+
+export const getJobs: APIGatewayProxyHandler = async (event) => {
   try {
-    // 1. Fetch all company profiles to check status
-    const profilesResult = await docClient.send(
-      new ScanCommand({
-        TableName: tableName,
-        FilterExpression: "SK = :sk",
-        ExpressionAttributeValues: {
-          ":sk": "PROFILE",
-        },
-      }),
-    );
+    const queryParams = event?.queryStringParameters || {};
+    const q = queryParams.q || queryParams.query || "";
+    const modalidad = queryParams.modalidad || "";
+    const page = queryParams.page ? Number(queryParams.page) : undefined;
+    const limit = queryParams.limit ? Number(queryParams.limit) : undefined;
 
-    const suspendedCompanies = new Set<string>();
-    (profilesResult.Items || []).forEach((p: any) => {
-      const companyId = p.PK.replace("USER#", "");
-      if (
-        p.estadoCuenta === "SUSPENDIDA" ||
-        p.estadoCuenta === "SUSPENDIDA_TEMPORAL"
-      ) {
-        // If it's a temporal suspension, check if it's still active
-        if (p.estadoCuenta === "SUSPENDIDA_TEMPORAL" && p.fechaFinSuspension) {
-          if (new Date() < new Date(p.fechaFinSuspension)) {
-            suspendedCompanies.add(companyId);
+    const searchResult = await searchOpenSearchOrFallback(
+      {
+        index: "jobnet-vacancies",
+        query: q,
+        filters: modalidad ? { modalidad } : undefined,
+        page,
+        limit,
+      },
+      async () => {
+        // 1. Fetch all company profiles to check status
+        const profilesResult = await docClient.send(
+          new ScanCommand({
+            TableName: tableName,
+            FilterExpression: "SK = :sk",
+            ExpressionAttributeValues: {
+              ":sk": "PROFILE",
+            },
+          }),
+        );
+
+        const suspendedCompanies = new Set<string>();
+        (profilesResult.Items || []).forEach((p: any) => {
+          const companyId = p.PK.replace("USER#", "");
+          if (
+            p.estadoCuenta === "SUSPENDIDA" ||
+            p.estadoCuenta === "SUSPENDIDA_TEMPORAL"
+          ) {
+            if (
+              p.estadoCuenta === "SUSPENDIDA_TEMPORAL" &&
+              p.fechaFinSuspension
+            ) {
+              if (new Date() < new Date(p.fechaFinSuspension)) {
+                suspendedCompanies.add(companyId);
+              }
+            } else {
+              suspendedCompanies.add(companyId);
+            }
           }
-        } else {
-          suspendedCompanies.add(companyId);
-        }
-      }
-    });
+        });
 
-    // 2. Fetch all vacancies
-    const result = await docClient.send(
-      new ScanCommand({
-        TableName: tableName,
-        FilterExpression: "SK = :sk AND begins_with(PK, :pkPrefix)",
-        ExpressionAttributeValues: {
-          ":sk": "METADATA",
-          ":pkPrefix": "VACANCY#",
-        },
-      }),
+        // 2. Fetch all vacancies
+        const result = await docClient.send(
+          new ScanCommand({
+            TableName: tableName,
+            FilterExpression: "SK = :sk AND begins_with(PK, :pkPrefix)",
+            ExpressionAttributeValues: {
+              ":sk": "METADATA",
+              ":pkPrefix": "VACANCY#",
+            },
+          }),
+        );
+
+        return (result.Items || [])
+          .map((item) => {
+            const raw = {
+              id: item.PK.replace("VACANCY#", ""),
+              title: item.titulo || item.title,
+              company: item.company || "Empresa",
+              empresaUuid: item.empresaUuid || "",
+              lat: item.ubicacion?.lat || item.lat || 0,
+              lng: item.ubicacion?.lng || item.lng || 0,
+              modalidad: item.modalidad || "Presencial",
+              salario: item.salario || 0,
+              habilidadesRequeridas: item.habilidadesRequeridas || [],
+              sectores: item.sectores || [],
+              descripcion: item.descripcion || "Sin descripción",
+              pdfUrl: item.pdfUrl || "",
+              estado: item.estado || "Activa",
+              createdAt: item.fechaCreacion || item.createdAt,
+            };
+            return enrichJobItem(raw);
+          })
+          .filter((j) => {
+            if (j.estado === "CERRADA") return false;
+            if (suspendedCompanies.has(j.empresaUuid)) return false;
+            return true;
+          });
+      },
     );
 
-    const jobs = (result.Items || [])
-      .map((item) => ({
-        id: item.PK.replace("VACANCY#", ""),
-        title: item.titulo || item.title,
-        company: item.company || "Empresa",
-        empresaUuid: item.empresaUuid || "",
-        lat: item.ubicacion?.lat || item.lat || 0,
-        lng: item.ubicacion?.lng || item.lng || 0,
-        modalidad: item.modalidad || "Presencial",
-        salario: item.salario || 0,
-        habilidadesRequeridas: item.habilidadesRequeridas || [],
-        sectores: item.sectores || [],
-        descripcion: item.descripcion || "Sin descripción",
-        pdfUrl: item.pdfUrl || "",
-        estado: item.estado || "Activa",
-        createdAt: item.fechaCreacion || item.createdAt,
-      }))
-      .filter((j) => {
-        // Hide logically deleted vacancies
-        if (j.estado === "CERRADA") return false;
-        // Hide vacancies from suspended companies
-        if (suspendedCompanies.has(j.empresaUuid)) return false;
-        return true;
-      });
+    const hasSearchParams = Boolean(q || modalidad || page || limit);
+    const bodyContent = hasSearchParams
+      ? {
+          data: searchResult.hits,
+          total: searchResult.total,
+          page: searchResult.page,
+          totalPages: searchResult.totalPages,
+          source: searchResult.source,
+        }
+      : searchResult.hits;
 
     return {
       statusCode: 200,
@@ -127,7 +162,113 @@ export const getJobs: APIGatewayProxyHandler = async () => {
         "Access-Control-Allow-Credentials": true,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(jobs),
+      body: JSON.stringify(bodyContent),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const getJobById: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Missing path parameter 'id'" }),
+      };
+    }
+
+    const candidateId =
+      event.queryStringParameters?.candidateId ||
+      event.queryStringParameters?.userId;
+
+    const result = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${id}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    if (!result.Item) {
+      return {
+        statusCode: 404,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ error: "Job not found" }),
+      };
+    }
+
+    const item = result.Item;
+    const rawJob = {
+      id: item.PK.replace("VACANCY#", ""),
+      title: item.titulo || item.title,
+      company: item.company || "Empresa",
+      empresaUuid: item.empresaUuid || "",
+      lat: item.ubicacion?.lat || item.lat || 0,
+      lng: item.ubicacion?.lng || item.lng || 0,
+      modalidad: item.modalidad || "Presencial",
+      salario: item.salario || 0,
+      habilidadesRequeridas: item.habilidadesRequeridas || [],
+      sectores: item.sectores || [],
+      descripcion: item.descripcion || "Sin descripción",
+      pdfUrl: item.pdfUrl || "",
+      estado: item.estado || "Activa",
+      createdAt: item.fechaCreacion || item.createdAt,
+    };
+
+    let appliedJobsMap:
+      Map<string, { applicationId: string; status: string }> | undefined;
+    if (candidateId) {
+      const appResult = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "PK = :pk AND SK = :sk",
+          ExpressionAttributeValues: {
+            ":pk": `JOB#${id}`,
+            ":sk": `APP#${candidateId}`,
+          },
+        }),
+      );
+      appliedJobsMap = new Map();
+      if (appResult.Items && appResult.Items.length > 0) {
+        const appItem = appResult.Items[0];
+        appliedJobsMap.set(id, {
+          applicationId: appItem.candidateId,
+          status: appItem.status || "PENDIENTE",
+        });
+      }
+    }
+
+    const enriched = enrichJobItem(rawJob, appliedJobsMap);
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(enriched),
     };
   } catch (error: unknown) {
     return {

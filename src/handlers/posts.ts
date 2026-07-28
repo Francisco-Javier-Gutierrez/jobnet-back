@@ -33,8 +33,12 @@ const headers = {
   "Content-Type": "application/json",
 };
 
-export const getPosts: APIGatewayProxyHandler = async () => {
+export const getPosts: APIGatewayProxyHandler = async (event) => {
   try {
+    const authorUuidParam = event.queryStringParameters?.authorUuid;
+    const authorNameParam = event.queryStringParameters?.author;
+    const bookmarkedByParam = event.queryStringParameters?.bookmarkedBy;
+
     // Scan all items where PK starts with POST#
     const result = await docClient.send(
       new ScanCommand({
@@ -99,10 +103,31 @@ export const getPosts: APIGatewayProxyHandler = async () => {
     }
 
     // Convert map to array and sort by createdAt descending
-    const posts = Object.values(postsMap).sort(
+    let posts = Object.values(postsMap).sort(
       (a: any, b: any) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
+
+    if (authorUuidParam) {
+      posts = posts.filter(
+        (p: any) =>
+          p.authorUuid === authorUuidParam ||
+          (authorNameParam &&
+            p.author.toLowerCase() === authorNameParam.toLowerCase()),
+      );
+    } else if (authorNameParam) {
+      posts = posts.filter(
+        (p: any) => p.author.toLowerCase() === authorNameParam.toLowerCase(),
+      );
+    }
+
+    if (bookmarkedByParam) {
+      posts = posts.filter(
+        (p: any) =>
+          Array.isArray(p.bookmarksList) &&
+          p.bookmarksList.includes(bookmarkedByParam),
+      );
+    }
 
     return {
       statusCode: 200,
