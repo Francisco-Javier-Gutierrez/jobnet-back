@@ -6,6 +6,7 @@ import {
   PutCommand,
   ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { enrichProfileItem } from "../utils/dtoEnricher";
 
 const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -67,7 +68,7 @@ export const getProfile: APIGatewayProxyHandler = async (event) => {
         "Access-Control-Allow-Credentials": true,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(result.Item),
+      body: JSON.stringify(enrichProfileItem(result.Item)),
     };
   } catch (error: unknown) {
     return {
@@ -154,17 +155,56 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-export const listProfiles: APIGatewayProxyHandler = async () => {
+export const listProfiles: APIGatewayProxyHandler = async (event) => {
   try {
+    const roleParam =
+      event.queryStringParameters?.tipoUsuario ||
+      event.queryStringParameters?.role;
+    const queryParam =
+      event.queryStringParameters?.q || event.queryStringParameters?.query;
+
+    let filterExpression = "SK = :sk";
+    const expressionValues: Record<string, any> = {
+      ":sk": "PROFILE",
+    };
+
+    if (roleParam) {
+      filterExpression += " AND tipoUsuario = :role";
+      expressionValues[":role"] = roleParam.toUpperCase();
+    }
+
     const result = await docClient.send(
       new ScanCommand({
         TableName: tableName,
-        FilterExpression: "SK = :sk",
-        ExpressionAttributeValues: {
-          ":sk": "PROFILE",
-        },
+        FilterExpression: filterExpression,
+        ExpressionAttributeValues: expressionValues,
       }),
     );
+
+    let items = result.Items || [];
+
+    if (queryParam && queryParam.trim() !== "") {
+      const q = queryParam.toLowerCase().trim();
+      items = items.filter((item: any) => {
+        const name = (
+          item.nombre ||
+          item.nombreComercial ||
+          item.name ||
+          ""
+        ).toLowerCase();
+        const razon = (item.razonSocial || "").toLowerCase();
+        const taxId = (item.taxId || item.rfc || "").toLowerCase();
+        const sector = (item.sector || "").toLowerCase();
+        return (
+          name.includes(q) ||
+          razon.includes(q) ||
+          taxId.includes(q) ||
+          sector.includes(q)
+        );
+      });
+    }
+
+    const enrichedItems = items.map((i: any) => enrichProfileItem(i));
 
     return {
       statusCode: 200,
@@ -173,7 +213,7 @@ export const listProfiles: APIGatewayProxyHandler = async () => {
         "Access-Control-Allow-Credentials": true,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(result.Items || []),
+      body: JSON.stringify(enrichedItems),
     };
   } catch (error: unknown) {
     return {

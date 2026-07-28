@@ -15,5 +15,5 @@ output "s3_upload_bucket" {
 }
 
 output "opensearch_endpoint" {
-  value = "mock-opensearch.us-east-1.es.amazonaws.com"
+  value = aws_opensearch_domain.search.endpoint
 }

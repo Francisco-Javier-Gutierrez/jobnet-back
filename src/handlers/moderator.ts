@@ -45,7 +45,7 @@ const headers = {
 
 export interface AuditLogParams {
   targetId: string;
-  targetType: "EMPRESA" | "VACANTE" | "CANDIDATO";
+  targetType: "ORGANIZACION" | "VACANTE" | "CANDIDATO";
   action: string;
   reason: string;
   executorId?: string;
@@ -121,7 +121,7 @@ export const getVerificationRequests: APIGatewayProxyHandler = async () => {
 export const resolveVerification: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId = event.pathParameters?.companyId;
-    if (!companyId) {
+    if (!companyId || companyId === "undefined") {
       return {
         statusCode: 400,
         headers,
@@ -239,7 +239,21 @@ export const getIncidents: APIGatewayProxyHandler = async () => {
 export const createIncident: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
-    const { jobId, jobTitle, reporter, reason, severity, infraccion } = body;
+    const {
+      jobId,
+      jobTitle,
+      postId,
+      postTitle,
+      companyId,
+      companyName,
+      targetType,
+      targetId,
+      targetTitle,
+      reporter,
+      reason,
+      severity,
+      infraccion,
+    } = body;
 
     if (!reason) {
       return {
@@ -255,8 +269,30 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     const incidentItem = {
       PK: `INCIDENT#${uuid}`,
       SK: "METADATA",
-      jobId: jobId || "",
-      jobTitle: jobTitle || "",
+      targetType:
+        targetType ||
+        (jobId
+          ? "VACANTE"
+          : postId
+            ? "POST"
+            : companyId
+              ? "ORGANIZACION"
+              : "GENERAL"),
+      targetId: targetId || jobId || postId || companyId || "",
+      targetTitle: targetTitle || jobTitle || postTitle || companyName || "",
+      jobId: jobId || (targetType === "VACANTE" ? targetId : ""),
+      jobTitle: jobTitle || (targetType === "VACANTE" ? targetTitle : ""),
+      postId: postId || (targetType === "POST" ? targetId : ""),
+      companyId:
+        companyId ||
+        (targetType === "ORGANIZACION" || targetType === "EMPRESA"
+          ? targetId
+          : ""),
+      companyName:
+        companyName ||
+        (targetType === "ORGANIZACION" || targetType === "EMPRESA"
+          ? targetTitle
+          : ""),
       reporter: reporter || "Anónimo",
       reason,
       severity: severity || "media",
@@ -333,7 +369,8 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
           targetId: jobId,
           targetType: "VACANTE",
           action: "SUSPENSION_AUTOMATICA_RF72",
-          reason: "Acumulación de 5 o más denuncias en menos de 12 horas (RF-72)",
+          reason:
+            "Acumulación de 5 o más denuncias en menos de 12 horas (RF-72)",
           executorId: "SISTEMA_AUTOGUARDIA",
         });
       }
@@ -469,13 +506,24 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               }),
             );
 
-            if (compProfileRes.Item && compProfileRes.Item.email && compProfileRes.Item.email.includes("@")) {
+            if (
+              compProfileRes.Item &&
+              compProfileRes.Item.email &&
+              compProfileRes.Item.email.includes("@")
+            ) {
               const compDomain = compProfileRes.Item.email.split("@")[1];
-              await blockCorporateDomain(compDomain, incident.reason || "Suspensión por vacante fraudulenta", vacancyRes.Item.empresaUuid);
+              await blockCorporateDomain(
+                compDomain,
+                incident.reason || "Suspensión por vacante fraudulenta",
+                vacancyRes.Item.empresaUuid,
+              );
             }
           }
         } catch (e) {
-          console.error("Error auto-blocking corporate domain on incident resolve:", e);
+          console.error(
+            "Error auto-blocking corporate domain on incident resolve:",
+            e,
+          );
         }
       } else if (action === "evaluate") {
         // Pause vacancy for evaluation (Fase 1: Notificación y pausa)
@@ -1132,7 +1180,8 @@ export async function blockCorporateDomain(
         domain: cleanDomain,
         blockedAt: timestamp,
         reason:
-          reason || "Suspensión por prácticas fraudulentas o suplantación (RF-74)",
+          reason ||
+          "Suspensión por prácticas fraudulentas o suplantación (RF-74)",
         companyId: companyId || "",
       },
     }),
@@ -1141,7 +1190,7 @@ export async function blockCorporateDomain(
   // RF-73: Audit log entry
   await saveAuditLog({
     targetId: cleanDomain,
-    targetType: "EMPRESA",
+    targetType: "ORGANIZACION",
     action: "BLOQUEO_DOMINIO_CORPORATIVO_RF74",
     reason: `Dominio @${cleanDomain} bloqueado: ${reason}`,
     executorId: "MODERADOR",
@@ -1172,6 +1221,539 @@ export const getBlockedDomains: APIGatewayProxyHandler = async () => {
       statusCode: 200,
       headers,
       body: JSON.stringify(domains),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+// RF-7: Proceso de Suspensión de Cuentas por Infracción (Fase 1 - Inicio)
+export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
+  try {
+    const companyId =
+      event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined") {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "companyId válido es requerido" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const reason =
+      body.reason || "Infracción de términos de servicio y conducta";
+    const graceDays = typeof body.graceDays === "number" ? body.graceDays : 4;
+
+    const now = new Date();
+    const gracePeriodEnd = new Date(
+      now.getTime() + graceDays * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const ttlSeconds =
+      Math.floor(now.getTime() / 1000) + graceDays * 24 * 60 * 60;
+    const timestamp = now.toISOString();
+
+    // 1. Marcar empresa en estado "En revisión"
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+        UpdateExpression:
+          "SET estatus = :st, suspensionReason = :sr, suspensionGracePeriodEnd = :spe, suspensionStatus = :ss, updatedAt = :u",
+        ExpressionAttributeValues: {
+          ":st": "En revisión",
+          ":sr": reason,
+          ":spe": gracePeriodEnd,
+          ":ss": "IN_REVIEW",
+          ":u": timestamp,
+        },
+      }),
+    );
+
+    // 2. Crear registro de periodo de gracia con TTL en DynamoDB STD
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `SUSPENSION#${companyId}`,
+          SK: "GRACE_PERIOD",
+          companyId,
+          reason,
+          status: "IN_REVIEW",
+          createdAt: timestamp,
+          gracePeriodEnd,
+          ttl: ttlSeconds,
+        },
+      }),
+    );
+
+    // 3. Crear mensaje inicial de Administración en el Chat de Apelación
+    const initialMsgId = Math.random().toString(36).substring(2, 15);
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `APPEAL_CHAT#${companyId}`,
+          SK: `MSG#${timestamp}#${initialMsgId}`,
+          companyId,
+          senderId: "ADMIN",
+          text: `[NOTIFICACIÓN OFICIAL DE ADMINISTRACIÓN] Se ha iniciado un proceso de revisión de cuenta por la siguiente infracción: "${reason}". Dispone de ${graceDays} días de gracia para presentar su justificación o evidencia.`,
+          createdAt: timestamp,
+          isSystemNotice: true,
+        },
+      }),
+    );
+
+    // 4. Crear notificación oficial con botón de apelar para la empresa
+    const notifId = Math.random().toString(36).substring(2, 15);
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `USER#${companyId}`,
+          SK: `NOTIFICATION#${timestamp}#${notifId}`,
+          id: notifId,
+          type: "SUSPENSION_NOTICE",
+          title: "Notificación Oficial de Infracción y Proceso de Suspensión",
+          message: `Su cuenta ha entrado en estado de Revisión debido a: ${reason}. Dispone de un periodo de gracia hasta el ${new Date(
+            gracePeriodEnd,
+          ).toLocaleDateString()} para apelar la decisión a través del chat directo de soporte.`,
+          reason,
+          gracePeriodEnd,
+          createdAt: timestamp,
+          read: false,
+          actionRequired: true,
+          actionType: "APPEAL_SUSPENSION",
+        },
+      }),
+    );
+
+    // 4. Auditoría
+    await saveAuditLog({
+      targetId: companyId,
+      targetType: "ORGANIZACION",
+      action: "INICIO_PROCESO_SUSPENSION_RF7",
+      reason: `Suspensión iniciada (Gracia ${graceDays} días): ${reason}`,
+      executorId: "MODERADOR",
+    });
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: "Proceso de suspensión iniciado exitosamente",
+        companyId,
+        status: "En revisión",
+        gracePeriodEnd,
+        reason,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+// RF-7: Fase 3a - Dictamen Favorable / Revocación de Suspensión
+export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
+  try {
+    const companyId =
+      event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined") {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "companyId válido es requerido" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const notes = body.notes || "Apelación aprobada. Suspensión revocada.";
+    const timestamp = new Date().toISOString();
+
+    // 1. Eliminar registro de periodo de gracia TTL
+    await docClient.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: { PK: `SUSPENSION#${companyId}`, SK: "GRACE_PERIOD" },
+      }),
+    );
+
+    // 2. Restablecer estado de la empresa a "Activa"
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+        UpdateExpression:
+          "SET estatus = :st, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u REMOVE suspensionReason, suspensionGracePeriodEnd",
+        ExpressionAttributeValues: {
+          ":st": "Activa",
+          ":b": false,
+          ":ss": "CANCELLED",
+          ":u": timestamp,
+        },
+      }),
+    );
+
+    // 3. Notificación de apelación favorable
+    const notifId = Math.random().toString(36).substring(2, 15);
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `USER#${companyId}`,
+          SK: `NOTIFICATION#${timestamp}#${notifId}`,
+          id: notifId,
+          type: "SUSPENSION_CANCELLED",
+          title: "Apelación Favorable: Suspensión Revocada",
+          message: `El proceso de suspensión ha sido revocado y su cuenta se encuentra nuevamente Activa. Dictamen: ${notes}`,
+          createdAt: timestamp,
+          read: false,
+        },
+      }),
+    );
+
+    // 4. Auditoría
+    await saveAuditLog({
+      targetId: companyId,
+      targetType: "ORGANIZACION",
+      action: "REVOCACION_SUSPENSION_RF7",
+      reason: `Suspensión revocada / Apelación aprobada: ${notes}`,
+      executorId: "MODERADOR",
+    });
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: "Suspensión cancelada y cuenta restablecida a Activa",
+        companyId,
+        status: "Activa",
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+// RF-7: Fase 3b - Dictamen Desfavorable / Suspensión Definitiva
+export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
+  try {
+    const companyId =
+      event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined") {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "companyId válido es requerido" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const reason =
+      body.reason ||
+      "Dictamen desfavorable tras proceso de evaluación/apelación";
+    const timestamp = new Date().toISOString();
+
+    // 1. Eliminar registro de periodo de gracia TTL
+    await docClient.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: { PK: `SUSPENSION#${companyId}`, SK: "GRACE_PERIOD" },
+      }),
+    );
+
+    // 2. Cambiar estado a "Suspendida" y bloquear la cuenta
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+        UpdateExpression:
+          "SET estatus = :st, bloqueada = :b, suspensionStatus = :ss, suspensionReason = :sr, updatedAt = :u",
+        ExpressionAttributeValues: {
+          ":st": "Suspendida",
+          ":b": true,
+          ":ss": "SUSPENDED",
+          ":sr": reason,
+          ":u": timestamp,
+        },
+      }),
+    );
+
+    // 3. Ocultar vacantes del Job Board
+    const jobsResult = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk AND companyId = :cid",
+        ExpressionAttributeValues: {
+          ":sk": "METADATA",
+          ":cid": companyId,
+        },
+      }),
+    );
+
+    for (const item of jobsResult.Items || []) {
+      if (item.PK.startsWith("JOB#")) {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: item.PK, SK: "METADATA" },
+            UpdateExpression:
+              "SET estatus = :st, suspendida = :s, updatedAt = :u",
+            ExpressionAttributeValues: {
+              ":st": "Oculta",
+              ":s": true,
+              ":u": timestamp,
+            },
+          }),
+        );
+      }
+    }
+
+    // 4. Notificación de suspensión definitiva
+    const notifId = Math.random().toString(36).substring(2, 15);
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `USER#${companyId}`,
+          SK: `NOTIFICATION#${timestamp}#${notifId}`,
+          id: notifId,
+          type: "SUSPENSION_CONFIRMED",
+          title: "Resolución Final: Cuenta Suspendida",
+          message: `Su cuenta ha sido suspendida definitivamente. El inicio de sesión ha sido bloqueado y sus vacantes han sido ocultadas del Job Board. Motivo: ${reason}`,
+          createdAt: timestamp,
+          read: false,
+        },
+      }),
+    );
+
+    // 5. Auditoría
+    await saveAuditLog({
+      targetId: companyId,
+      targetType: "ORGANIZACION",
+      action: "SUSPENSION_DEFINITIVA_RF7",
+      reason: `Suspensión ejecutada definitivamente: ${reason}`,
+      executorId: "MODERADOR",
+    });
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: "Empresa suspendida definitivamente y vacantes ocultadas",
+        companyId,
+        status: "Suspendida",
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+// RF-7: Consulta de Estado de Suspensión
+export const getSuspensionStatus: APIGatewayProxyHandler = async (event) => {
+  try {
+    const companyId =
+      event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined") {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "companyId válido es requerido" }),
+      };
+    }
+
+    const profileRes = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+      }),
+    );
+
+    const graceRes = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: `SUSPENSION#${companyId}`, SK: "GRACE_PERIOD" },
+      }),
+    );
+
+    const profile = profileRes.Item || {};
+    const graceItem = graceRes.Item;
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        companyId,
+        estatus: profile.estatus || "Activa",
+        bloqueada: Boolean(profile.bloqueada),
+        inGracePeriod: Boolean(graceItem),
+        gracePeriodEnd:
+          graceItem?.gracePeriodEnd || profile.suspensionGracePeriodEnd || null,
+        reason: graceItem?.reason || profile.suspensionReason || null,
+        createdAt: graceItem?.createdAt || profile.updatedAt || null,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+// RF-7: Trigger para expiración de TTL de DynamoDB Streams
+export const handleSuspensionExpiry = async (event: any) => {
+  console.log(
+    "Processing DynamoDB Stream TTL Event for Suspension:",
+    JSON.stringify(event),
+  );
+
+  for (const record of event.Records || []) {
+    if (record.eventName === "REMOVE") {
+      const oldImage = record.dynamodb?.OldImage;
+      if (!oldImage) continue;
+
+      const pk = oldImage.PK?.S || "";
+      const sk = oldImage.SK?.S || "";
+
+      if (pk.startsWith("SUSPENSION#") && sk === "GRACE_PERIOD") {
+        const companyId =
+          oldImage.companyId?.S || pk.replace("SUSPENSION#", "");
+        const status = oldImage.status?.S;
+
+        if (status === "IN_REVIEW") {
+          console.log(
+            `TTL Expired for company ${companyId}. Executing automatic suspension.`,
+          );
+          const timestamp = new Date().toISOString();
+
+          await docClient.send(
+            new UpdateCommand({
+              TableName: tableName,
+              Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+              UpdateExpression:
+                "SET estatus = :st, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u",
+              ExpressionAttributeValues: {
+                ":st": "Suspendida",
+                ":b": true,
+                ":ss": "SUSPENDED_BY_TTL",
+                ":u": timestamp,
+              },
+            }),
+          );
+
+          const jobsResult = await docClient.send(
+            new ScanCommand({
+              TableName: tableName,
+              FilterExpression: "SK = :sk AND companyId = :cid",
+              ExpressionAttributeValues: {
+                ":sk": "METADATA",
+                ":cid": companyId,
+              },
+            }),
+          );
+
+          for (const item of jobsResult.Items || []) {
+            if (item.PK.startsWith("JOB#")) {
+              await docClient.send(
+                new UpdateCommand({
+                  TableName: tableName,
+                  Key: { PK: item.PK, SK: "METADATA" },
+                  UpdateExpression:
+                    "SET estatus = :st, suspendida = :s, updatedAt = :u",
+                  ExpressionAttributeValues: {
+                    ":st": "Oculta",
+                    ":s": true,
+                    ":u": timestamp,
+                  },
+                }),
+              );
+            }
+          }
+
+          await saveAuditLog({
+            targetId: companyId,
+            targetType: "ORGANIZACION",
+            action: "SUSPENSION_AUTOMATICA_TTL_EXPIRADO",
+            reason:
+              "Periodo de gracia concluyó sin resolución/apelación favorable. Cuenta suspendida automáticamente.",
+            executorId: "SISTEMA_DYNAMODB_TTL",
+          });
+        }
+      }
+    }
+  }
+};
+
+// RF-7: Acción de la Empresa para Unirse al Chat de Apelación
+export const joinAppeal: APIGatewayProxyHandler = async (event) => {
+  try {
+    const companyId =
+      event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "companyId es requerido" }),
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+
+    // Actualizar perfil y registro de gracia indicando que la empresa se unió a la apelación
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+        UpdateExpression: "SET apelacionIniciada = :ai, updatedAt = :u",
+        ExpressionAttributeValues: {
+          ":ai": true,
+          ":u": timestamp,
+        },
+      }),
+    );
+
+    const joinMsgId = Math.random().toString(36).substring(2, 15);
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `APPEAL_CHAT#${companyId}`,
+          SK: `MSG#${timestamp}#${joinMsgId}`,
+          companyId,
+          senderId: companyId,
+          text: "💬 La empresa se ha unido al chat de apelación para presentar su justificación.",
+          createdAt: timestamp,
+          isJoinMessage: true,
+        },
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: "Unido a la apelación con éxito",
+        companyId,
+      }),
     };
   } catch (error: unknown) {
     return {

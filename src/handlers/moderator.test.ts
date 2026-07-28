@@ -772,7 +772,10 @@ describe("moderator handler", () => {
 
       const event = {
         pathParameters: { disputeId: "disp-1" },
-        body: JSON.stringify({ action: "resolve", notes: "Reviewed and settled" }),
+        body: JSON.stringify({
+          action: "resolve",
+          notes: "Reviewed and settled",
+        }),
       } as any;
 
       const response = await resolveDispute(event, {} as any, () => {});

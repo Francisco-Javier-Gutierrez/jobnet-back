@@ -88,14 +88,14 @@ describe("postConfirmation handler", () => {
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
-  it("should process EMPRESA user correctly", async () => {
-    const event = createEvent("EMPRESA", "Tech Corp");
+  it("should process ORGANIZACION user correctly", async () => {
+    const event = createEvent("ORGANIZACION", "Tech Corp");
     await handler(event, {} as never, () => {});
     expect(mockCognitoSend).toHaveBeenCalled();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
-  it("should block EMPRESA signup if corporate domain is suspended (RF-74)", async () => {
+  it("should block ORGANIZACION signup if corporate domain is suspended (RF-74)", async () => {
     mockDynamoSend.mockResolvedValueOnce({
       Item: {
         PK: "BLOCKED_DOMAIN#fraudcorp.com",
@@ -107,7 +107,9 @@ describe("postConfirmation handler", () => {
     const event = createEvent("EMPRESA", "Fraud Corp");
     event.request.userAttributes.email = "recruiter@fraudcorp.com";
 
-    await expect(handler(event, {} as never, () => {})).rejects.toThrow(/RF-74/);
+    await expect(handler(event, {} as never, () => {})).rejects.toThrow(
+      /RF-74/,
+    );
   });
 
   it("should process ADMIN user correctly", async () => {

@@ -143,12 +143,111 @@ export const sendMessage = async (event: any) => {
       jobId,
       candidateId,
       disputeId,
+      appealCompanyId,
       text,
       attachmentUrl,
       attachmentType,
       attachmentName,
       attachmentKey,
     } = body;
+
+    // Handle Appeal Chat Routing if appealCompanyId is present
+    if (appealCompanyId) {
+      if (!text && !attachmentUrl) {
+        return {
+          statusCode: 400,
+          body: "Missing text or attachment parameter for appeal message",
+        };
+      }
+
+      const timestamp = new Date().toISOString();
+      const messageItem: any = {
+        PK: `APPEAL_CHAT#${appealCompanyId}`,
+        SK: `MSG#${timestamp}`,
+        companyId: appealCompanyId,
+        senderId,
+        text: text || "",
+        createdAt: timestamp,
+      };
+
+      if (attachmentUrl) {
+        messageItem.attachmentUrl = attachmentUrl;
+        messageItem.attachmentType = attachmentType || "file";
+        messageItem.attachmentName = attachmentName || "attachment";
+        messageItem.attachmentKey = attachmentKey || "";
+      }
+
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: messageItem,
+        }),
+      );
+
+      const targetUserIds = new Set<string>();
+      targetUserIds.add(appealCompanyId);
+      targetUserIds.add("ADMIN");
+      targetUserIds.add("MODERATOR");
+
+      const apigwClient = new ApiGatewayManagementApiClient({
+        endpoint: getEndpoint(event),
+      });
+
+      const recipientPromises: Promise<void>[] = [];
+      for (const uid of targetUserIds) {
+        if (uid === senderId) continue;
+        const connRes = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+            ExpressionAttributeValues: {
+              ":pk": `USER#${uid}`,
+              ":skPrefix": "WS_CONNECTION#",
+            },
+          }),
+        );
+        for (const cItem of connRes.Items || []) {
+          const cid = cItem.SK.replace("WS_CONNECTION#", "");
+          recipientPromises.push(
+            apigwClient
+              .send(
+                new PostToConnectionCommand({
+                  ConnectionId: cid,
+                  Data: Buffer.from(
+                    JSON.stringify({
+                      type: "APPEAL_MESSAGE",
+                      appealCompanyId,
+                      senderId,
+                      text: text || "",
+                      attachmentUrl,
+                      createdAt: timestamp,
+                    }),
+                  ),
+                }),
+              )
+              .then(() => {})
+              .catch(async (err) => {
+                if (err.name === "GoneException") {
+                  await docClient.send(
+                    new DeleteCommand({
+                      TableName: tableName,
+                      Key: { PK: `USER#${uid}`, SK: `WS_CONNECTION#${cid}` },
+                    }),
+                  );
+                }
+              }),
+          );
+        }
+      }
+      await Promise.all(recipientPromises);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: "Appeal message sent",
+          item: messageItem,
+        }),
+      };
+    }
 
     // Handle Dispute/Claim Chat Routing if disputeId is present
     if (disputeId) {
@@ -506,6 +605,67 @@ export const getDisputeMessages: APIGatewayProxyHandler = async (
 
     const messages = (result.Items || []).map((m) => ({
       disputeId: m.disputeId,
+      senderId: m.senderId,
+      text: m.text,
+      attachmentUrl: m.attachmentUrl || null,
+      attachmentType: m.attachmentType || null,
+      attachmentName: m.attachmentName || null,
+      createdAt: m.createdAt,
+    }));
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(messages),
+    };
+  } catch (error: any) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: error.message }),
+    };
+  }
+};
+
+export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
+  const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
+
+  if (!companyId) {
+    return {
+      statusCode: 400,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        error: "Missing path parameter 'companyId'",
+      }),
+    };
+  }
+
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        ExpressionAttributeValues: {
+          ":pk": `APPEAL_CHAT#${companyId}`,
+          ":skPrefix": "MSG#",
+        },
+      }),
+    );
+
+    const messages = (result.Items || []).map((m) => ({
+      companyId: m.companyId,
       senderId: m.senderId,
       text: m.text,
       attachmentUrl: m.attachmentUrl || null,
