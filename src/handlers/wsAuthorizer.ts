@@ -35,7 +35,29 @@ export const handler = async (event: any) => {
 
   try {
     const payload = await verifier!.verify(token);
-    return generatePolicy(payload.sub, "Allow", (event as any).methodArn);
+    const groups = (payload["cognito:groups"] as string[]) || [];
+    const customRole = (
+      payload["custom:role"] ||
+      payload["custom:tipoUsuario"] ||
+      (event as any).queryStringParameters?.role ||
+      ""
+    )
+      .toString()
+      .toUpperCase();
+
+    const isMod =
+      customRole === "ADMIN" ||
+      customRole === "MODERATOR" ||
+      groups.includes("ADMIN") ||
+      groups.includes("MODERATOR");
+
+    const role = isMod ? "MODERATOR" : "USER";
+
+    return generatePolicy(payload.sub, "Allow", (event as any).methodArn, {
+      role,
+      sub: payload.sub,
+      email: (payload.email as string) || "",
+    });
   } catch (err) {
     console.error("Token verification failed: ", err);
     return generatePolicy("user", "Deny", (event as any).methodArn);
@@ -46,6 +68,7 @@ const generatePolicy = (
   principalId: string,
   effect: "Allow" | "Deny",
   resource: string,
+  context?: Record<string, any>,
 ) => {
   return {
     principalId,
@@ -59,5 +82,6 @@ const generatePolicy = (
         },
       ],
     },
+    context: context || {},
   };
 };

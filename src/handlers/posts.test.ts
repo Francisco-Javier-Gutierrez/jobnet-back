@@ -49,6 +49,7 @@ import {
 describe("posts handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDynamoSend.mockResolvedValue({ Item: null });
   });
 
   describe("getPosts", () => {

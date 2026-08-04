@@ -7,8 +7,13 @@ import {
   PutCommand,
   UpdateCommand,
   DeleteCommand,
+  QueryCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import {
+  ApiGatewayManagementApiClient,
+  PostToConnectionCommand,
+} from "@aws-sdk/client-apigatewaymanagementapi";
 
 const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -35,12 +40,119 @@ const sesClient = isOffline
       },
     })
   : new SESClient({});
-const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Credentials": true,
   "Content-Type": "application/json",
+};
+
+const getEndpoint = (event: any) => {
+  if (isOffline) {
+    return "http://localhost:3002";
+  }
+  const wsApiId = process.env.WS_API_ID || "lzvcx59zaa";
+  const stage = event.requestContext?.stage || "prod";
+  const domainName = event.requestContext?.domainName;
+  if (domainName && domainName.includes(wsApiId)) {
+    return `https://${domainName}/${stage}`;
+  }
+  return `https://${wsApiId}.execute-api.us-east-1.amazonaws.com/${stage}`;
+};
+
+const broadcastAppealResolved = async (
+  companyId: string,
+  status: string,
+  event: any,
+) => {
+  const targetKeys: string[] = [`USER#${companyId}`, "ROLE#MODERATOR"];
+
+  try {
+    const companyProfile = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+      }),
+    );
+    const ownerSub =
+      companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
+    if (
+      ownerSub &&
+      ownerSub !== companyId &&
+      !targetKeys.includes(`USER#${ownerSub}`)
+    ) {
+      targetKeys.push(`USER#${ownerSub}`);
+    }
+  } catch {
+    // Non-critical
+  }
+
+  const apigwClient = new ApiGatewayManagementApiClient({
+    endpoint: getEndpoint(event),
+  });
+
+  const payload = JSON.stringify({
+    type: "APPEAL_RESOLVED",
+    appealCompanyId: companyId,
+    status,
+  });
+
+  for (const pkKey of targetKeys) {
+    const connRes = await docClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        ExpressionAttributeValues: {
+          ":pk": pkKey,
+          ":skPrefix": "WS_CONNECTION#",
+        },
+      }),
+    );
+    for (const cItem of connRes.Items || []) {
+      const cid = cItem.SK.replace("WS_CONNECTION#", "");
+      try {
+        await apigwClient.send(
+          new PostToConnectionCommand({
+            ConnectionId: cid,
+            Data: Buffer.from(payload),
+          }),
+        );
+      } catch (err: any) {
+        if (err.statusCode === 410 || err.name === "GoneException") {
+          await docClient.send(
+            new DeleteCommand({
+              TableName: tableName,
+              Key: { PK: pkKey, SK: `WS_CONNECTION#${cid}` },
+            }),
+          );
+        }
+      }
+    }
+  }
+};
+
+const getOrgAppealMessageCount = async (companyId: string): Promise<number> => {
+  if (!companyId) return 0;
+  try {
+    const result = await docClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+        ExpressionAttributeValues: {
+          ":pk": `APPEAL_CHAT#${companyId}`,
+          ":skPrefix": "MSG#",
+        },
+      }),
+    );
+
+    const items = result.Items || [];
+    const orgMsgs = items.filter((m: any) => m.senderId === companyId);
+    return orgMsgs.length;
+  } catch (err) {
+    console.error(`Error counting appeal messages for ${companyId}:`, err);
+    return 0;
+  }
 };
 
 export interface AuditLogParams {
@@ -211,8 +323,29 @@ export const getIncidents: APIGatewayProxyHandler = async () => {
     const incidents = (result.Items || [])
       .map((item: any) => ({
         id: item.PK.replace("INCIDENT#", ""),
+        targetType:
+          item.targetType ||
+          (item.jobId
+            ? "VACANTE"
+            : item.postId
+              ? "POST"
+              : item.companyId
+                ? "ORGANIZACION"
+                : "GENERAL"),
+        targetId:
+          item.targetId || item.jobId || item.postId || item.companyId || "",
+        targetTitle:
+          item.targetTitle ||
+          item.jobTitle ||
+          item.postTitle ||
+          item.companyName ||
+          "Contenido sin título",
         jobId: item.jobId || "",
-        jobTitle: item.jobTitle || "Vacante sin título",
+        jobTitle: item.jobTitle || "",
+        postId: item.postId || "",
+        postTitle: item.postTitle || "",
+        companyId: item.companyId || "",
+        companyName: item.companyName || "",
         reporter: item.reporter || "Anónimo",
         reason: item.reason || "",
         severity: item.severity || "media",
@@ -442,6 +575,45 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
 
     const incident = existing.Item;
 
+    // Retrieve target company ID
+    let targetCompanyId = incident.companyId;
+    if (!targetCompanyId && incident.jobId) {
+      const vacancyRes = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            PK: `VACANCY#${incident.jobId}`,
+            SK: "METADATA",
+          },
+        }),
+      );
+      if (vacancyRes.Item) {
+        targetCompanyId =
+          vacancyRes.Item.empresaUuid || vacancyRes.Item.companyId;
+      }
+    }
+
+    // Require at least 3 messages from the organization if resolving an evaluated incident/appeal
+    if (
+      (existing.Item.estatus === "EVALUACION" ||
+        action === "approve" ||
+        action === "block") &&
+      incident.jobId
+    ) {
+      if (targetCompanyId) {
+        const orgMsgCount = await getOrgAppealMessageCount(targetCompanyId);
+        if (orgMsgCount < 3) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              error: `Se requieren al menos 3 mensajes de evidencia o justificación por parte de la organización en el chat de apelación para emitir dictamen final. (Mensajes actuales de la empresa: ${orgMsgCount}/3)`,
+            }),
+          };
+        }
+      }
+    }
+
     // Update incident status
     const newStatus =
       action === "block"
@@ -467,7 +639,8 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
 
     if (incident.jobId) {
       if (action === "block") {
-        // Soft delete the vacancy (Fase 3: Ejecución de sanción)
+        // RF-24 Fase 2 — Ejecución del Borrado Lógico de la vacante fraudulenta
+        const timestamp = new Date().toISOString();
         await docClient.send(
           new UpdateCommand({
             TableName: tableName,
@@ -475,13 +648,37 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               PK: `VACANCY#${incident.jobId}`,
               SK: "METADATA",
             },
-            UpdateExpression: "SET estado = :closed, deletedAt = :deleted",
+            UpdateExpression:
+              "SET estado = :deletedState, suspendida = :s, isDeleted = :del, oculta = :o, deletedAt = :deleted",
             ExpressionAttributeValues: {
-              ":closed": "CERRADA",
-              ":deleted": new Date().toISOString(),
+              ":deletedState": "Eliminada",
+              ":s": true,
+              ":del": true,
+              ":o": true,
+              ":deleted": timestamp,
             },
           }),
         );
+
+        // RF-24 Fase 1 — Notificación de Resolución Desfavorable
+        if (targetCompanyId) {
+          const notifId = Math.random().toString(36).substring(2, 15);
+          await docClient.send(
+            new PutCommand({
+              TableName: tableName,
+              Item: {
+                PK: `USER#${targetCompanyId}`,
+                SK: `NOTIFICATION#${timestamp}#${notifId}`,
+                id: notifId,
+                type: "SUSPENSION_CONFIRMED",
+                title: "Resolución Desfavorable: Vacante Eliminada",
+                message: `Tras la evaluación de la apelación, la resolución ha sido en su contra y la vacante ha sido eliminada definitivamente del Job Board por infracción de normas.`,
+                createdAt: timestamp,
+                read: false,
+              },
+            }),
+          );
+        }
 
         // RF-74: Extraer correo de la empresa y bloquear dominio corporativo si aplica
         try {
@@ -526,9 +723,10 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
           );
         }
       } else if (action === "evaluate") {
-        // Pause vacancy for evaluation (Fase 1: Notificación y pausa)
+        // RF-23 Fase 1 — Pausar vacante para evaluación y notificar oficialmente
         const graceLimit = new Date();
         graceLimit.setDate(graceLimit.getDate() + 15);
+        const timestamp = new Date().toISOString();
 
         await docClient.send(
           new UpdateCommand({
@@ -546,7 +744,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
           }),
         );
 
-        // Fetch company profile to retrieve email
+        // Fetch company profile to retrieve email and push in-app notification
         const vacancy = await docClient.send(
           new GetCommand({
             TableName: tableName,
@@ -572,11 +770,36 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             companyProfile.Item?.email || "empresa@jobnet.com";
           const jobTitle = vacancy.Item.titulo || "Vacante";
 
+          // RF-23 Fase 1: Notificación in-app persistente
+          const notifId = Math.random().toString(36).substring(2, 15);
+          await docClient.send(
+            new PutCommand({
+              TableName: tableName,
+              Item: {
+                PK: `USER#${vacancy.Item.empresaUuid}`,
+                SK: `NOTIFICATION#${timestamp}#${notifId}`,
+                id: notifId,
+                type: "SUSPENSION_NOTICE",
+                title: "Notificación Oficial: Vacante Pausada para Evaluación",
+                message: `Su publicación de empleo "${jobTitle}" ha sido pausada preventivamente por denuncias de infracción. Dispone de un periodo de gracia hasta el ${graceLimit.toLocaleDateString()} para presentar su apelación a través del soporte.`,
+                reason:
+                  incident.reason ||
+                  "Evaluación preventiva por reportes acumulados",
+                gracePeriodEnd: graceLimit.toISOString(),
+                createdAt: timestamp,
+                read: false,
+                actionRequired: true,
+                actionType: "APPEAL_SUSPENSION",
+                companyId: vacancy.Item.empresaUuid,
+              },
+            }),
+          );
+
           // Send warning email via SES
           await sesClient
             .send(
               new SendEmailCommand({
-                Source: "noreply@jobnet-platform.com",
+                Source: "noreply@franciscojgh.com",
                 Destination: {
                   ToAddresses: [companyEmail],
                 },
@@ -600,7 +823,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             );
         }
       } else if (action === "approve") {
-        // Reactivate vacancy back to active (Fase 3: Apelación favorable)
+        // Fase 3 — Reactivar vacante (apelación favorable)
         await docClient.send(
           new UpdateCommand({
             TableName: tableName,
@@ -616,6 +839,125 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             },
           }),
         );
+      }
+    } else if (targetCompanyId) {
+      // Organization Incident Handling (RF-26)
+      if (action === "evaluate") {
+        await executeOrgSuspensionInitiation(
+          targetCompanyId,
+          incident.reason ||
+            "Revisión por reportes e incidencias de organización",
+          4,
+        );
+      } else if (action === "block") {
+        const timestamp = new Date().toISOString();
+        await docClient.send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: { PK: `SUSPENSION#${targetCompanyId}`, SK: "GRACE_PERIOD" },
+          }),
+        );
+
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${targetCompanyId}`, SK: "PROFILE" },
+            UpdateExpression:
+              "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, suspensionReason = :sr, updatedAt = :u",
+            ExpressionAttributeValues: {
+              ":st": "Suspendida",
+              ":ec": "SUSPENDIDA",
+              ":b": true,
+              ":ss": "SUSPENDED",
+              ":sr": incident.reason || "Dictamen desfavorable",
+              ":u": timestamp,
+            },
+          }),
+        );
+
+        const notifId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCompanyId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifId}`,
+              id: notifId,
+              type: "SUSPENSION_CONFIRMED",
+              title: "Resolución Final: Cuenta Suspendida",
+              message: `Su cuenta de organización ha sido suspendida definitivamente debido a infracciones.`,
+              createdAt: timestamp,
+              read: false,
+            },
+          }),
+        );
+      } else if (action === "approve") {
+        const timestamp = new Date().toISOString();
+        await docClient.send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: { PK: `SUSPENSION#${targetCompanyId}`, SK: "GRACE_PERIOD" },
+          }),
+        );
+
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${targetCompanyId}`, SK: "PROFILE" },
+            UpdateExpression:
+              "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u REMOVE suspensionReason, suspensionGracePeriodEnd",
+            ExpressionAttributeValues: {
+              ":st": "Activa",
+              ":ec": "ACTIVO",
+              ":b": false,
+              ":ss": "CANCELLED",
+              ":u": timestamp,
+            },
+          }),
+        );
+
+        const notifId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCompanyId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifId}`,
+              id: notifId,
+              type: "SUSPENSION_CANCELLED",
+              title: "Apelación Favorable: Suspensión Revocada",
+              message: `El reporte en contra de su organización ha sido desestimado y su cuenta se encuentra activa.`,
+              createdAt: timestamp,
+              read: false,
+            },
+          }),
+        );
+      }
+    } else if (incident.postId) {
+      if (action === "block") {
+        const postItemsResult = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "PK = :pk",
+            ExpressionAttributeValues: {
+              ":pk": `POST#${incident.postId}`,
+            },
+          }),
+        );
+
+        const items = postItemsResult.Items || [];
+
+        for (const item of items) {
+          await docClient.send(
+            new DeleteCommand({
+              TableName: tableName,
+              Key: {
+                PK: item.PK,
+                SK: item.SK,
+              },
+            }),
+          );
+        }
       }
     }
 
@@ -660,24 +1002,73 @@ function getLevenshteinDistance(a: string, b: string): number {
   return tmp[a.length][b.length];
 }
 
-export const getSuggestedSkills: APIGatewayProxyHandler = async () => {
+export const getSuggestedSkills: APIGatewayProxyHandler = async (event) => {
   try {
-    const result = await docClient.send(
+    const categoryFilter = event.queryStringParameters?.category;
+
+    // 1. Scan all pending suggestions
+    const suggestionsResult = await docClient.send(
       new ScanCommand({
         TableName: tableName,
-        FilterExpression: "SK = :sk AND begins_with(PK, :prefix)",
+        FilterExpression:
+          "SK = :sk AND (begins_with(PK, :skillPrefix) OR begins_with(PK, :sectorPrefix))",
         ExpressionAttributeValues: {
           ":sk": "METADATA",
-          ":prefix": "SUGGESTION#SKILL#",
+          ":skillPrefix": "SUGGESTION#SKILL#",
+          ":sectorPrefix": "SUGGESTION#SECTOR#",
         },
       }),
     );
 
-    const suggestions = (result.Items || []).map((item: any) => ({
-      id: item.PK.replace("SUGGESTION#SKILL#", ""),
-      name: item.name || "",
-      createdAt: item.fechaCreacion || "",
-    }));
+    // 2. Scan all master catalog items to pre-calculate similarity matches
+    const catalogResult = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "SK = :sk",
+        ExpressionAttributeValues: {
+          ":sk": "CATALOG",
+        },
+      }),
+    );
+    const catalogItems = catalogResult.Items || [];
+
+    let suggestions = (suggestionsResult.Items || []).map((item: any) => {
+      const isSector =
+        item.PK.startsWith("SUGGESTION#SECTOR#") || item.category === "Sector";
+      const itemCategory: "Habilidad" | "Sector" = isSector
+        ? "Sector"
+        : "Habilidad";
+      const id = item.PK.replace("SUGGESTION#SKILL#", "").replace(
+        "SUGGESTION#SECTOR#",
+        "",
+      );
+      const name = item.name || "";
+
+      // Find similarity matches in the same category
+      const sameCatCatalog = catalogItems.filter(
+        (cat: any) => cat.category === itemCategory,
+      );
+      const duplicateMatch = sameCatCatalog.find((cat: any) => {
+        if (cat.name.toLowerCase() === name.toLowerCase()) return true;
+        const dist = getLevenshteinDistance(cat.name, name);
+        return dist <= 2;
+      });
+
+      return {
+        id,
+        name,
+        category: itemCategory,
+        createdAt: item.fechaCreacion || item.createdAt || "",
+        hasDuplicate: !!duplicateMatch,
+        existingName: duplicateMatch ? duplicateMatch.name : null,
+      };
+    });
+
+    if (categoryFilter) {
+      suggestions = suggestions.filter(
+        (s) => s.category.toLowerCase() === categoryFilter.toLowerCase(),
+      );
+    }
 
     return {
       statusCode: 200,
@@ -696,7 +1087,7 @@ export const getSuggestedSkills: APIGatewayProxyHandler = async () => {
 export const createSkillSuggestion: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
-    const { name } = body;
+    const { name, category } = body;
 
     if (!name) {
       return {
@@ -706,13 +1097,19 @@ export const createSkillSuggestion: APIGatewayProxyHandler = async (event) => {
       };
     }
 
+    const isSector =
+      category === "Sector" || (event.path && event.path.includes("/sectors/"));
+    const cat = isSector ? "Sector" : "Habilidad";
+    const pkPrefix = isSector ? "SUGGESTION#SECTOR#" : "SUGGESTION#SKILL#";
+
     const uuid = Math.random().toString(36).substring(2, 15);
     const createdAt = new Date().toISOString();
 
     const suggestionItem = {
-      PK: `SUGGESTION#SKILL#${uuid}`,
+      PK: `${pkPrefix}${uuid}`,
       SK: "METADATA",
       name: name.trim(),
+      category: cat,
       fechaCreacion: createdAt,
     };
 
@@ -753,7 +1150,7 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
     }
 
     const body = JSON.parse(event.body || "{}");
-    const { approve, unifyWith } = body;
+    const { approve, unifyWith, unifyMode, addAnyway } = body;
 
     if (approve === undefined) {
       return {
@@ -763,8 +1160,8 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    // Fetch existing suggestion
-    const existing = await docClient.send(
+    // Fetch existing suggestion (try skill first, then sector)
+    let existing = await docClient.send(
       new GetCommand({
         TableName: tableName,
         Key: {
@@ -775,96 +1172,108 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
     );
 
     if (!existing.Item) {
+      existing = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            PK: `SUGGESTION#SECTOR#${suggestionId}`,
+            SK: "METADATA",
+          },
+        }),
+      );
+    }
+
+    if (!existing.Item) {
       return {
         statusCode: 404,
         headers,
-        body: JSON.stringify({ error: "Skill suggestion not found" }),
+        body: JSON.stringify({ error: "Suggestion not found" }),
       };
     }
 
     const suggestion = existing.Item;
-    const skillName = suggestion.name;
+    const itemName = suggestion.name;
+    const itemCategory: "Habilidad" | "Sector" =
+      suggestion.category ||
+      (suggestion.PK.includes("#SECTOR#") ? "Sector" : "Habilidad");
 
     if (approve) {
-      // If no explicit unifyWith is provided, check for similarity duplicates
-      if (!unifyWith) {
-        // Fetch all catalog skills
-        const catalogResult = await docClient.send(
+      // Unification mode: REPLACE_EXISTING (replace existing master catalog name with suggested name)
+      if (unifyMode === "REPLACE_EXISTING" && unifyWith) {
+        // Find existing catalog item with unifyWith name
+        const findCatalog = await docClient.send(
           new ScanCommand({
             TableName: tableName,
-            FilterExpression: "SK = :sk",
+            FilterExpression: "SK = :sk AND category = :cat AND valName = :v",
             ExpressionAttributeValues: {
               ":sk": "CATALOG",
+              ":cat": itemCategory,
+              ":v": unifyWith.toLowerCase(),
             },
           }),
         );
 
-        const items = catalogResult.Items || [];
-        const skills = items.filter(
-          (item: any) => item.category === "Habilidad",
-        );
-
-        // Check for similarity
-        const duplicate = skills.find((skill: any) => {
-          // Exact match
-          if (skill.name.toLowerCase() === skillName.toLowerCase()) return true;
-          // Levenshtein similarity
-          const dist = getLevenshteinDistance(skill.name, skillName);
-          return dist <= 2;
-        });
-
-        if (duplicate) {
-          return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({
-              duplicate: true,
-              existingName: duplicate.name,
-              message: `La habilidad '${skillName}' es muy similar a '${duplicate.name}'.`,
+        if (findCatalog.Items && findCatalog.Items.length > 0) {
+          const targetCatalogItem = findCatalog.Items[0];
+          await docClient.send(
+            new UpdateCommand({
+              TableName: tableName,
+              Key: { PK: targetCatalogItem.PK, SK: "CATALOG" },
+              UpdateExpression:
+                "SET #n = :newName, valName = :valName, updatedAt = :u",
+              ExpressionAttributeNames: { "#n": "name" },
+              ExpressionAttributeValues: {
+                ":newName": itemName,
+                ":valName": itemName.toLowerCase(),
+                ":u": new Date().toISOString(),
+              },
             }),
-          };
+          );
         }
-      }
+      } else if (unifyMode === "KEEP_EXISTING") {
+        // Simply keep existing catalog item without adding new
+      } else if (addAnyway || !unifyWith) {
+        // Add as a brand new independent master catalog item
+        const uuid = Math.random().toString(36).substring(2, 15);
+        const finalName = unifyWith || itemName;
 
-      // If approved or unified: add to catalog
-      const finalName = unifyWith || skillName;
-      const uuid = Math.random().toString(36).substring(2, 15);
-
-      // Check if it already exists exactly in catalog to avoid duplicates
-      const exactCheck = await docClient.send(
-        new ScanCommand({
-          TableName: tableName,
-          FilterExpression: "SK = :sk AND valName = :valName",
-          ExpressionAttributeValues: {
-            ":sk": "CATALOG",
-            ":valName": finalName.toLowerCase(),
-          },
-        }),
-      );
-
-      if (!exactCheck.Items || exactCheck.Items.length === 0) {
-        await docClient.send(
-          new PutCommand({
+        const exactCheck = await docClient.send(
+          new ScanCommand({
             TableName: tableName,
-            Item: {
-              PK: `CATALOG#${uuid}`,
-              SK: "CATALOG",
-              name: finalName,
-              valName: finalName.toLowerCase(),
-              category: "Habilidad",
-              createdAt: new Date().toISOString(),
+            FilterExpression:
+              "SK = :sk AND valName = :valName AND category = :cat",
+            ExpressionAttributeValues: {
+              ":sk": "CATALOG",
+              ":valName": finalName.toLowerCase(),
+              ":cat": itemCategory,
             },
           }),
         );
+
+        if (!exactCheck.Items || exactCheck.Items.length === 0) {
+          await docClient.send(
+            new PutCommand({
+              TableName: tableName,
+              Item: {
+                PK: `CATALOG#${uuid}`,
+                SK: "CATALOG",
+                name: finalName,
+                valName: finalName.toLowerCase(),
+                category: itemCategory,
+                createdAt: new Date().toISOString(),
+              },
+            }),
+          );
+        }
       }
     }
 
-    // Delete suggestion
+    // Delete suggestion from DynamoDB
     await docClient.send(
       new DeleteCommand({
         TableName: tableName,
         Key: {
-          PK: `SUGGESTION#SKILL#${suggestionId}`,
+          PK: suggestion.PK,
           SK: "METADATA",
         },
       }),
@@ -876,231 +1285,8 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
       body: JSON.stringify({
         success: true,
         action: approve ? "APPROVED" : "REJECTED",
-        unified: !!unifyWith,
-      }),
-    };
-  } catch (error: unknown) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: (error as Error).message }),
-    };
-  }
-};
-
-export const getDisputes: APIGatewayProxyHandler = async (event) => {
-  try {
-    const userId = event.queryStringParameters?.userId;
-    const result = await docClient.send(
-      new ScanCommand({
-        TableName: tableName,
-        FilterExpression: "SK = :sk AND begins_with(PK, :prefix)",
-        ExpressionAttributeValues: {
-          ":sk": "METADATA",
-          ":prefix": "DISPUTE#",
-        },
-      }),
-    );
-
-    let disputes = (result.Items || []).map((item: any) => ({
-      id: item.PK.replace("DISPUTE#", ""),
-      jobId: item.jobId || "",
-      jobTitle: item.jobTitle || "Vacante",
-      candidateId: item.candidateId || "",
-      companyId: item.companyId || "",
-      complainantId: item.complainantId || "",
-      complainantRole: item.complainantRole || "CANDIDATO",
-      complainantName: item.complainantName || "Usuario",
-      reason: item.reason || "",
-      description: item.description || "",
-      attachments: item.attachments || [],
-      estatus: item.estatus || "ABIERTA",
-      fechaCreacion: item.fechaCreacion || "",
-      fechaResolucion: item.fechaResolucion || null,
-      notes: item.notes || "",
-    }));
-
-    if (userId) {
-      disputes = disputes.filter(
-        (d) =>
-          d.candidateId === userId ||
-          d.companyId === userId ||
-          d.complainantId === userId,
-      );
-    }
-
-    disputes.sort((a, b) => b.fechaCreacion.localeCompare(a.fechaCreacion));
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify(disputes),
-    };
-  } catch (error: unknown) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: (error as Error).message }),
-    };
-  }
-};
-
-export const createDispute: APIGatewayProxyHandler = async (event) => {
-  try {
-    const body = JSON.parse(event.body || "{}");
-    const {
-      jobId,
-      jobTitle,
-      candidateId,
-      companyId,
-      complainantId,
-      complainantRole,
-      complainantName,
-      reason,
-      description,
-      attachments,
-    } = body;
-
-    if (!reason || !complainantId) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({
-          error: "Missing required fields 'reason' or 'complainantId'",
-        }),
-      };
-    }
-
-    const disputeId = Math.random().toString(36).substring(2, 15);
-    const createdAt = new Date().toISOString();
-
-    const disputeItem: any = {
-      PK: `DISPUTE#${disputeId}`,
-      SK: "METADATA",
-      jobId: jobId || "",
-      jobTitle: jobTitle || "",
-      candidateId: candidateId || "",
-      companyId: companyId || "",
-      complainantId,
-      complainantRole: complainantRole || "CANDIDATO",
-      complainantName: complainantName || "Usuario",
-      reason,
-      description: description || "",
-      attachments: attachments || [],
-      estatus: "ABIERTA",
-      fechaCreacion: createdAt,
-    };
-
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: disputeItem,
-      }),
-    );
-
-    // Initial system message in dispute chat thread
-    const msgTimestamp = new Date().toISOString();
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `DISPUTE#${disputeId}`,
-          SK: `MSG#${msgTimestamp}`,
-          disputeId,
-          senderId: complainantId,
-          text: `Reclamo Abierto: ${reason}. ${description ? "Detalle: " + description : ""}`,
-          createdAt: msgTimestamp,
-        },
-      }),
-    );
-
-    return {
-      statusCode: 201,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        id: disputeId,
-        ...disputeItem,
-      }),
-    };
-  } catch (error: unknown) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: (error as Error).message }),
-    };
-  }
-};
-
-export const resolveDispute: APIGatewayProxyHandler = async (event) => {
-  try {
-    const disputeId = event.pathParameters?.disputeId;
-    if (!disputeId) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({ error: "Missing path parameter 'disputeId'" }),
-      };
-    }
-
-    const body = JSON.parse(event.body || "{}");
-    const { action, notes } = body;
-
-    if (!action || !["resolve", "reject", "in_review"].includes(action)) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({
-          error:
-            "Invalid or missing body parameter 'action'. Must be 'resolve', 'reject' or 'in_review'",
-        }),
-      };
-    }
-
-    const newStatus =
-      action === "resolve"
-        ? "RESUELTA"
-        : action === "reject"
-          ? "RECHAZADA"
-          : "EN_REVISION";
-
-    const resolvedAt = new Date().toISOString();
-
-    await docClient.send(
-      new UpdateCommand({
-        TableName: tableName,
-        Key: {
-          PK: `DISPUTE#${disputeId}`,
-          SK: "METADATA",
-        },
-        UpdateExpression:
-          "SET estatus = :st, notes = :notes, fechaResolucion = :fr",
-        ExpressionAttributeValues: {
-          ":st": newStatus,
-          ":notes": notes || "",
-          ":fr": resolvedAt,
-        },
-      }),
-    );
-
-    // RF-73: Registra auditoría de resolución de disputa
-    await saveAuditLog({
-      targetId: disputeId,
-      targetType: "VACANTE",
-      action: `RESOLUCION_DISPUTA_${newStatus}`,
-      reason: notes || `Dictamen de disputa actualizado a ${newStatus}`,
-      executorId: "MODERADOR",
-    });
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        success: true,
-        disputeId,
-        estatus: newStatus,
-        notes: notes || "",
-        fechaResolucion: resolvedAt,
+        unifyMode: unifyMode || null,
+        category: itemCategory,
       }),
     };
   } catch (error: unknown) {
@@ -1231,7 +1417,162 @@ export const getBlockedDomains: APIGatewayProxyHandler = async () => {
   }
 };
 
-// RF-7: Proceso de Suspensión de Cuentas por Infracción (Fase 1 - Inicio)
+// Fase 1 — Inicio del proceso de suspensión de cuenta
+export async function executeOrgSuspensionInitiation(
+  companyId: string,
+  reason: string,
+  graceDays: number = 4,
+) {
+  const now = new Date();
+  const gracePeriodEnd = new Date(
+    now.getTime() + graceDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+  const ttlSeconds =
+    Math.floor(now.getTime() / 1000) + graceDays * 24 * 60 * 60;
+  const timestamp = now.toISOString();
+
+  // 1. Marcar empresa en estado "En revisión"
+  await docClient.send(
+    new UpdateCommand({
+      TableName: tableName,
+      Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+      UpdateExpression:
+        "SET estatus = :st, estadoCuenta = :ec, suspensionReason = :sr, suspensionGracePeriodEnd = :spe, suspensionStatus = :ss, updatedAt = :u",
+      ExpressionAttributeValues: {
+        ":st": "En revisión",
+        ":ec": "REVISION",
+        ":sr": reason,
+        ":spe": gracePeriodEnd,
+        ":ss": "IN_REVIEW",
+        ":u": timestamp,
+      },
+    }),
+  );
+
+  // 2. Crear registro de periodo de gracia con TTL en DynamoDB STD
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        PK: `SUSPENSION#${companyId}`,
+        SK: "GRACE_PERIOD",
+        companyId,
+        reason,
+        status: "IN_REVIEW",
+        createdAt: timestamp,
+        gracePeriodEnd,
+        ttl: ttlSeconds,
+      },
+    }),
+  );
+
+  // 3. Crear mensaje inicial de Administración en el Chat de Apelación
+  const initialMsgId = Math.random().toString(36).substring(2, 15);
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        PK: `APPEAL_CHAT#${companyId}`,
+        SK: `MSG#${timestamp}#${initialMsgId}`,
+        companyId,
+        senderId: "ADMIN",
+        text: `[NOTIFICACIÓN OFICIAL DE ADMINISTRACIÓN] Se ha iniciado un proceso de revisión de cuenta por la siguiente infracción: "${reason}". Dispone de ${graceDays} días de gracia para presentar su justificación o evidencia.`,
+        createdAt: timestamp,
+        isSystemNotice: true,
+      },
+    }),
+  );
+
+  // 4. Crear notificación oficial con botón de apelar para la empresa
+  const notifId = Math.random().toString(36).substring(2, 15);
+  await docClient.send(
+    new PutCommand({
+      TableName: tableName,
+      Item: {
+        PK: `USER#${companyId}`,
+        SK: `NOTIFICATION#${timestamp}#${notifId}`,
+        id: notifId,
+        type: "SUSPENSION_NOTICE",
+        title: "Notificación Oficial de Infracción y Proceso de Suspensión",
+        message: `Su cuenta ha entrado en estado de Revisión debido a: ${reason}. Dispone de un periodo de gracia hasta el ${new Date(
+          gracePeriodEnd,
+        ).toLocaleDateString()} para apelar la decisión a través del chat directo de soporte.`,
+        reason,
+        gracePeriodEnd,
+        createdAt: timestamp,
+        read: false,
+        actionRequired: true,
+        actionType: "APPEAL_SUSPENSION",
+        companyId,
+      },
+    }),
+  );
+
+  // 5. Enviar correo electrónico oficial por SES
+  try {
+    const companyProfile = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `USER#${companyId}`,
+          SK: "PROFILE",
+        },
+      }),
+    );
+
+    const companyEmail = companyProfile.Item?.email;
+    const companyName =
+      companyProfile.Item?.nombreComercial ||
+      companyProfile.Item?.nombre ||
+      companyProfile.Item?.razonSocial ||
+      "Organización";
+
+    if (companyEmail && companyEmail.includes("@")) {
+      await sesClient
+        .send(
+          new SendEmailCommand({
+            Source: "noreply@franciscojgh.com",
+            Destination: {
+              ToAddresses: [companyEmail],
+            },
+            Message: {
+              Subject: {
+                Data: `ALERTA DE SEGURIDAD: Notificación Oficial de Infracción y Proceso de Suspensión (${companyName})`,
+              },
+              Body: {
+                Text: {
+                  Data: `Estimado representante de ${companyName},\n\nSu cuenta en la plataforma JobNet ha entrado en estado de Revisión debido a reportes o infracciones detectadas:\n\nMotivo: ${reason}\n\nSe ha iniciado un periodo de gracia hasta el ${new Date(
+                    gracePeriodEnd,
+                  ).toLocaleDateString()}. Puede ingresar a su panel corporativo y acceder a la sección de Apelaciones para comunicarse en tiempo real por chat con el equipo de moderación.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
+                },
+              },
+            },
+          }),
+        )
+        .catch((err) =>
+          console.error("Error sending SES email for org suspension:", err),
+        );
+    }
+  } catch (err) {
+    console.error(
+      "Error fetching company profile for SES email in initiateSuspension:",
+      err,
+    );
+  }
+
+  // 6. Auditoría
+  await saveAuditLog({
+    targetId: companyId,
+    targetType: "ORGANIZACION",
+    action: "INICIO_PROCESO_SUSPENSION",
+    reason: `Motivo: ${reason}. Días de gracia: ${graceDays}. Expiración: ${gracePeriodEnd}`,
+    executorId: "ADMIN",
+  });
+
+  return { gracePeriodEnd, timestamp };
+}
+
+// Fase 1 — Inicio del proceso de suspensión de cuenta
 export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId =
@@ -1249,97 +1590,11 @@ export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
       body.reason || "Infracción de términos de servicio y conducta";
     const graceDays = typeof body.graceDays === "number" ? body.graceDays : 4;
 
-    const now = new Date();
-    const gracePeriodEnd = new Date(
-      now.getTime() + graceDays * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    const ttlSeconds =
-      Math.floor(now.getTime() / 1000) + graceDays * 24 * 60 * 60;
-    const timestamp = now.toISOString();
-
-    // 1. Marcar empresa en estado "En revisión"
-    await docClient.send(
-      new UpdateCommand({
-        TableName: tableName,
-        Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
-        UpdateExpression:
-          "SET estatus = :st, suspensionReason = :sr, suspensionGracePeriodEnd = :spe, suspensionStatus = :ss, updatedAt = :u",
-        ExpressionAttributeValues: {
-          ":st": "En revisión",
-          ":sr": reason,
-          ":spe": gracePeriodEnd,
-          ":ss": "IN_REVIEW",
-          ":u": timestamp,
-        },
-      }),
+    const res = await executeOrgSuspensionInitiation(
+      companyId,
+      reason,
+      graceDays,
     );
-
-    // 2. Crear registro de periodo de gracia con TTL en DynamoDB STD
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `SUSPENSION#${companyId}`,
-          SK: "GRACE_PERIOD",
-          companyId,
-          reason,
-          status: "IN_REVIEW",
-          createdAt: timestamp,
-          gracePeriodEnd,
-          ttl: ttlSeconds,
-        },
-      }),
-    );
-
-    // 3. Crear mensaje inicial de Administración en el Chat de Apelación
-    const initialMsgId = Math.random().toString(36).substring(2, 15);
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `APPEAL_CHAT#${companyId}`,
-          SK: `MSG#${timestamp}#${initialMsgId}`,
-          companyId,
-          senderId: "ADMIN",
-          text: `[NOTIFICACIÓN OFICIAL DE ADMINISTRACIÓN] Se ha iniciado un proceso de revisión de cuenta por la siguiente infracción: "${reason}". Dispone de ${graceDays} días de gracia para presentar su justificación o evidencia.`,
-          createdAt: timestamp,
-          isSystemNotice: true,
-        },
-      }),
-    );
-
-    // 4. Crear notificación oficial con botón de apelar para la empresa
-    const notifId = Math.random().toString(36).substring(2, 15);
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `USER#${companyId}`,
-          SK: `NOTIFICATION#${timestamp}#${notifId}`,
-          id: notifId,
-          type: "SUSPENSION_NOTICE",
-          title: "Notificación Oficial de Infracción y Proceso de Suspensión",
-          message: `Su cuenta ha entrado en estado de Revisión debido a: ${reason}. Dispone de un periodo de gracia hasta el ${new Date(
-            gracePeriodEnd,
-          ).toLocaleDateString()} para apelar la decisión a través del chat directo de soporte.`,
-          reason,
-          gracePeriodEnd,
-          createdAt: timestamp,
-          read: false,
-          actionRequired: true,
-          actionType: "APPEAL_SUSPENSION",
-        },
-      }),
-    );
-
-    // 4. Auditoría
-    await saveAuditLog({
-      targetId: companyId,
-      targetType: "ORGANIZACION",
-      action: "INICIO_PROCESO_SUSPENSION_RF7",
-      reason: `Suspensión iniciada (Gracia ${graceDays} días): ${reason}`,
-      executorId: "MODERADOR",
-    });
 
     return {
       statusCode: 200,
@@ -1348,7 +1603,7 @@ export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
         message: "Proceso de suspensión iniciado exitosamente",
         companyId,
         status: "En revisión",
-        gracePeriodEnd,
+        gracePeriodEnd: res.gracePeriodEnd,
         reason,
       }),
     };
@@ -1361,7 +1616,7 @@ export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-// RF-7: Fase 3a - Dictamen Favorable / Revocación de Suspensión
+// Fase 3a — Dictamen favorable / Revocación de suspensión
 export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId =
@@ -1378,6 +1633,18 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
     const notes = body.notes || "Apelación aprobada. Suspensión revocada.";
     const timestamp = new Date().toISOString();
 
+    // Validar regla de al menos 3 mensajes por parte de la organización en el chat
+    const orgMsgCount = await getOrgAppealMessageCount(companyId);
+    if (orgMsgCount < 3) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: `Se requieren al menos 3 mensajes de evidencia o justificación por parte de la organización en el chat de apelación para emitir dictamen final. (Mensajes actuales de la empresa: ${orgMsgCount}/3)`,
+        }),
+      };
+    }
+
     // 1. Eliminar registro de periodo de gracia TTL
     await docClient.send(
       new DeleteCommand({
@@ -1392,9 +1659,10 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
         TableName: tableName,
         Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
         UpdateExpression:
-          "SET estatus = :st, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u REMOVE suspensionReason, suspensionGracePeriodEnd",
+          "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u REMOVE suspensionReason, suspensionGracePeriodEnd",
         ExpressionAttributeValues: {
           ":st": "Activa",
+          ":ec": "ACTIVO",
           ":b": false,
           ":ss": "CANCELLED",
           ":u": timestamp,
@@ -1429,6 +1697,9 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
       executorId: "MODERADOR",
     });
 
+    // 5. Broadcast WS de resolución
+    await broadcastAppealResolved(companyId, "CANCELLED", event);
+
     return {
       statusCode: 200,
       headers,
@@ -1447,7 +1718,7 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-// RF-7: Fase 3b - Dictamen Desfavorable / Suspensión Definitiva
+// Fase 3b — Dictamen desfavorable / Suspensión definitiva
 export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId =
@@ -1466,6 +1737,18 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       "Dictamen desfavorable tras proceso de evaluación/apelación";
     const timestamp = new Date().toISOString();
 
+    // Validar regla de al menos 3 mensajes por parte de la organización en el chat
+    const orgMsgCount = await getOrgAppealMessageCount(companyId);
+    if (orgMsgCount < 3) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: `Se requieren al menos 3 mensajes de evidencia o justificación por parte de la organización en el chat de apelación para emitir dictamen final. (Mensajes actuales de la empresa: ${orgMsgCount}/3)`,
+        }),
+      };
+    }
+
     // 1. Eliminar registro de periodo de gracia TTL
     await docClient.send(
       new DeleteCommand({
@@ -1480,9 +1763,10 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
         TableName: tableName,
         Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
         UpdateExpression:
-          "SET estatus = :st, bloqueada = :b, suspensionStatus = :ss, suspensionReason = :sr, updatedAt = :u",
+          "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, suspensionReason = :sr, updatedAt = :u",
         ExpressionAttributeValues: {
           ":st": "Suspendida",
+          ":ec": "SUSPENDIDA",
           ":b": true,
           ":ss": "SUSPENDED",
           ":sr": reason,
@@ -1548,6 +1832,9 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       executorId: "MODERADOR",
     });
 
+    // 6. Broadcast WS de resolución
+    await broadcastAppealResolved(companyId, "SUSPENDED", event);
+
     return {
       statusCode: 200,
       headers,
@@ -1566,7 +1853,7 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-// RF-7: Consulta de Estado de Suspensión
+// Consulta de estado de suspensión
 export const getSuspensionStatus: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId =
@@ -1619,7 +1906,7 @@ export const getSuspensionStatus: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-// RF-7: Trigger para expiración de TTL de DynamoDB Streams
+// Trigger de expiración TTL (DynamoDB Streams)
 export const handleSuspensionExpiry = async (event: any) => {
   console.log(
     "Processing DynamoDB Stream TTL Event for Suspension:",
@@ -1650,9 +1937,10 @@ export const handleSuspensionExpiry = async (event: any) => {
               TableName: tableName,
               Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
               UpdateExpression:
-                "SET estatus = :st, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u",
+                "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u",
               ExpressionAttributeValues: {
                 ":st": "Suspendida",
+                ":ec": "SUSPENDIDA",
                 ":b": true,
                 ":ss": "SUSPENDED_BY_TTL",
                 ":u": timestamp,
@@ -1703,7 +1991,7 @@ export const handleSuspensionExpiry = async (event: any) => {
   }
 };
 
-// RF-7: Acción de la Empresa para Unirse al Chat de Apelación
+// Empresa se une al chat de apelación
 export const joinAppeal: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId =
@@ -1718,7 +2006,7 @@ export const joinAppeal: APIGatewayProxyHandler = async (event) => {
 
     const timestamp = new Date().toISOString();
 
-    // Actualizar perfil y registro de gracia indicando que la empresa se unió a la apelación
+    // Actualizar perfil indicando que la empresa inició/accedió a la apelación si no estaba marcado
     await docClient.send(
       new UpdateCommand({
         TableName: tableName,
@@ -1731,22 +2019,6 @@ export const joinAppeal: APIGatewayProxyHandler = async (event) => {
       }),
     );
 
-    const joinMsgId = Math.random().toString(36).substring(2, 15);
-    await docClient.send(
-      new PutCommand({
-        TableName: tableName,
-        Item: {
-          PK: `APPEAL_CHAT#${companyId}`,
-          SK: `MSG#${timestamp}#${joinMsgId}`,
-          companyId,
-          senderId: companyId,
-          text: "💬 La empresa se ha unido al chat de apelación para presentar su justificación.",
-          createdAt: timestamp,
-          isJoinMessage: true,
-        },
-      }),
-    );
-
     return {
       statusCode: 200,
       headers,
@@ -1754,6 +2026,87 @@ export const joinAppeal: APIGatewayProxyHandler = async (event) => {
         message: "Unido a la apelación con éxito",
         companyId,
       }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const getAppeals: APIGatewayProxyHandler = async () => {
+  try {
+    // 1. Fetch organizations under review/appeal
+    const orgsResult = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression:
+          "SK = :sk AND (estatus = :st OR estadoCuenta = :ec OR suspensionStatus = :ss)",
+        ExpressionAttributeValues: {
+          ":sk": "PROFILE",
+          ":st": "En revisión",
+          ":ec": "REVISION",
+          ":ss": "IN_REVIEW",
+        },
+      }),
+    );
+
+    // 2. Fetch vacancies under evaluation/appeal
+    const vacanciesResult = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression:
+          "SK = :sk AND (estado = :evalState OR banderaRevisionObligatoria = :flag)",
+        ExpressionAttributeValues: {
+          ":sk": "METADATA",
+          ":evalState": "EVALUACION",
+          ":flag": true,
+        },
+      }),
+    );
+
+    const appeals = [
+      ...(orgsResult.Items || []).map((org: any) => ({
+        id: org.PK.replace("USER#", ""),
+        type: "ORGANIZACION",
+        companyId: org.PK.replace("USER#", ""),
+        name:
+          org.nombreComercial ||
+          org.nombre ||
+          org.razonSocial ||
+          "Organización en Apelación",
+        reason:
+          org.suspensionReason ||
+          "Proceso de revisión de cuenta e infracción de normas",
+        status: org.estatus || "En revisión",
+        gracePeriodEnd: org.suspensionGracePeriodEnd || null,
+        createdAt:
+          org.updatedAt || org.fechaCreacion || new Date().toISOString(),
+      })),
+      ...(vacanciesResult.Items || []).map((vac: any) => ({
+        id: vac.PK.replace("VACANCY#", ""),
+        type: "VACANTE",
+        jobId: vac.PK.replace("VACANCY#", ""),
+        companyId: vac.empresaUuid || "",
+        name: vac.titulo || "Vacante en evaluación",
+        reason:
+          vac.motivoSuspensionAutomatica ||
+          "Vacante pausada para evaluación por acumulación de reportes",
+        status: vac.estado || "EVALUACION",
+        gracePeriodEnd: vac.fechaLimiteApelacion || null,
+        createdAt:
+          vac.fechaActualizacion ||
+          vac.fechaCreacion ||
+          new Date().toISOString(),
+      })),
+    ];
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify(appeals),
     };
   } catch (error: unknown) {
     return {

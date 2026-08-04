@@ -15,5 +15,9 @@ output "s3_upload_bucket" {
 }
 
 output "opensearch_endpoint" {
-  value = aws_opensearch_domain.search.endpoint
+  value = try(aws_opensearch_domain.search[0].endpoint, "")
+}
+
+output "dynamodb_table_stream_arn" {
+  value = aws_dynamodb_table.jobs.stream_arn
 }

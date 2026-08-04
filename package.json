@@ -22,7 +22,6 @@
     "@aws-sdk/client-ses": "^3.500.0",
     "@aws-sdk/lib-dynamodb": "^3.1079.0",
     "@aws-sdk/s3-request-presigner": "^3.500.0",
-    "@opensearch-project/opensearch": "^2.2.0",
     "aws-jwt-verify": "^5.2.1"
   },
   "devDependencies": {

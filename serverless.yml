@@ -30,7 +30,6 @@ provider:
     S3_UPLOAD_BUCKET: jobnet-uploads-${self:provider.stage}
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, 'us-east-1_trquL61F2'}
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, '4ef8k4tofjj4ounvo8nf7d9pep'}
-    OPENSEARCH_ENDPOINT: ${env:OPENSEARCH_ENDPOINT, 'search-jobnet-search-prod-72yps4fybyd5lt66x4oxdayx2e.us-east-1.es.amazonaws.com'}
   iam:
     role:
       statements:
@@ -42,9 +41,18 @@ provider:
             - dynamodb:DeleteItem
             - dynamodb:Query
             - dynamodb:Scan
+            - dynamodb:BatchGetItem
           Resource:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}/index/*"
+        - Effect: Allow
+          Action:
+            - dynamodb:GetRecords
+            - dynamodb:GetShardIterator
+            - dynamodb:DescribeStream
+            - dynamodb:ListStreams
+          Resource:
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}/stream/*"
         - Effect: Allow
           Action:
             - cognito-idp:AdminAddUserToGroup
@@ -148,30 +156,13 @@ functions:
       - httpApi:
           path: /chats/{jobId}/{candidateId}/messages
           method: get
-  getDisputeMessages:
-    handler: src/handlers/wsHandlers.getDisputeMessages
+  sendChatMessageHttp:
+    handler: src/handlers/wsHandlers.sendChatMessageHttp
     events:
       - httpApi:
-          path: /disputes/{disputeId}/messages
-          method: get
-  getDisputes:
-    handler: src/handlers/moderator.getDisputes
-    events:
-      - httpApi:
-          path: /moderator/disputes
-          method: get
-  createDispute:
-    handler: src/handlers/moderator.createDispute
-    events:
-      - httpApi:
-          path: /moderator/disputes
+          path: /chats/{jobId}/{candidateId}/messages
           method: post
-  resolveDispute:
-    handler: src/handlers/moderator.resolveDispute
-    events:
-      - httpApi:
-          path: /moderator/disputes/{disputeId}/resolve
-          method: post
+
   getAuditLogs:
     handler: src/handlers/moderator.getAuditLogs
     events:
@@ -190,6 +181,24 @@ functions:
       - httpApi:
           path: /profile/{id}
           method: get
+  getProfileVacancies:
+    handler: src/handlers/profile.getProfileVacancies
+    events:
+      - httpApi:
+          path: /profile/{id}/vacancies
+          method: get
+  getProfilePosts:
+    handler: src/handlers/profile.getProfilePosts
+    events:
+      - httpApi:
+          path: /profile/{id}/posts
+          method: get
+  getProfileBookmarks:
+    handler: src/handlers/profile.getProfileBookmarks
+    events:
+      - httpApi:
+          path: /profile/{id}/bookmarks
+          method: get
   updateProfile:
     handler: src/handlers/profile.updateProfile
     events:
@@ -202,6 +211,24 @@ functions:
       - httpApi:
           path: /profiles
           method: get
+  getNotifications:
+    handler: src/handlers/profile.getNotifications
+    events:
+      - httpApi:
+          path: /profile/{id}/notifications
+          method: get
+  markNotificationRead:
+    handler: src/handlers/profile.markNotificationRead
+    events:
+      - httpApi:
+          path: /profile/{id}/notifications/{notifId}/read
+          method: post
+  markAllNotificationsRead:
+    handler: src/handlers/profile.markAllNotificationsRead
+    events:
+      - httpApi:
+          path: /profile/{id}/notifications/read-all
+          method: post
   getVerificationRequests:
     handler: src/handlers/moderator.getVerificationRequests
     events:
@@ -238,6 +265,16 @@ functions:
       - httpApi:
           path: /moderator/organizations/{id}/suspension-status
           method: get
+  handleSuspensionExpiry:
+    handler: src/handlers/moderator.handleSuspensionExpiry
+    events:
+      - stream:
+          type: dynamodb
+          arn: ${env:DYNAMODB_STREAM_ARN, 'arn:aws:dynamodb:us-east-1:293626296338:table/jobnet-jobs-prod/stream/2026-07-28T20:51:46.390'}
+          batchSize: 100
+          startingPosition: LATEST
+          filterPatterns:
+            - eventName: [REMOVE]
   getAppealMessages:
     handler: src/handlers/wsHandlers.getAppealMessages
     events:
@@ -250,6 +287,19 @@ functions:
       - httpApi:
           path: /moderator/organizations/{id}/join-appeal
           method: post
+  sendAppealMessageHttp:
+    handler: src/handlers/wsHandlers.sendAppealMessageHttp
+    events:
+      - httpApi:
+          path: /moderator/organizations/{id}/appeal-messages
+          method: post
+  getAppeals:
+    handler: src/handlers/moderator.getAppeals
+    events:
+      - httpApi:
+          path: /moderator/appeals
+          method: get
+
   getIncidents:
     handler: src/handlers/moderator.getIncidents
     events:
