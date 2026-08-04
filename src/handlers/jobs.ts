@@ -50,10 +50,9 @@ const sesClient = isOffline
     })
   : new SESClient({});
 
-const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
-const bucketName = process.env.S3_UPLOAD_BUCKET || "jobnet-uploads-dev";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
+const bucketName = process.env.S3_UPLOAD_BUCKET || "jobnet-uploads-prod";
 
-import { searchOpenSearchOrFallback } from "../utils/openSearchClient";
 import { enrichJobItem } from "../utils/dtoEnricher";
 
 export const getJobs: APIGatewayProxyHandler = async (event) => {
@@ -64,96 +63,136 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
     const page = queryParams.page ? Number(queryParams.page) : undefined;
     const limit = queryParams.limit ? Number(queryParams.limit) : undefined;
 
-    const searchResult = await searchOpenSearchOrFallback(
-      {
-        index: "jobnet-vacancies",
-        query: q,
-        filters: modalidad ? { modalidad } : undefined,
-        page,
-        limit,
-      },
-      async () => {
-        // 1. Fetch all company profiles to check status
-        const profilesResult = await docClient.send(
-          new ScanCommand({
-            TableName: tableName,
-            FilterExpression: "SK = :sk",
-            ExpressionAttributeValues: {
-              ":sk": "PROFILE",
-            },
-          }),
-        );
+    // 1. Fetch all company profiles to check status
+    let profilesItems: any[] = [];
+    let profilesLastKey: any = undefined;
 
-        const suspendedCompanies = new Set<string>();
-        (profilesResult.Items || []).forEach((p: any) => {
-          const companyId = p.PK.replace("USER#", "");
-          if (
-            p.estadoCuenta === "SUSPENDIDA" ||
-            p.estadoCuenta === "SUSPENDIDA_TEMPORAL"
-          ) {
-            if (
-              p.estadoCuenta === "SUSPENDIDA_TEMPORAL" &&
-              p.fechaFinSuspension
-            ) {
-              if (new Date() < new Date(p.fechaFinSuspension)) {
-                suspendedCompanies.add(companyId);
-              }
-            } else {
-              suspendedCompanies.add(companyId);
-            }
+    do {
+      const profilesResult = await docClient.send(
+        new ScanCommand({
+          TableName: tableName,
+          FilterExpression: "SK = :sk",
+          ExpressionAttributeValues: {
+            ":sk": "PROFILE",
+          },
+          ExclusiveStartKey: profilesLastKey,
+        }),
+      );
+      if (profilesResult.Items) {
+        profilesItems.push(...profilesResult.Items);
+      }
+      profilesLastKey = profilesResult.LastEvaluatedKey;
+    } while (profilesLastKey);
+
+    const suspendedCompanies = new Set<string>();
+    profilesItems.forEach((p: any) => {
+      const companyId = p.PK.replace("USER#", "");
+      if (
+        p.estadoCuenta === "SUSPENDIDA" ||
+        p.estadoCuenta === "SUSPENDIDA_TEMPORAL"
+      ) {
+        if (p.estadoCuenta === "SUSPENDIDA_TEMPORAL" && p.fechaFinSuspension) {
+          if (new Date() < new Date(p.fechaFinSuspension)) {
+            suspendedCompanies.add(companyId);
           }
-        });
+        } else {
+          suspendedCompanies.add(companyId);
+        }
+      }
+    });
 
-        // 2. Fetch all vacancies
-        const result = await docClient.send(
-          new ScanCommand({
-            TableName: tableName,
-            FilterExpression: "SK = :sk AND begins_with(PK, :pkPrefix)",
-            ExpressionAttributeValues: {
-              ":sk": "METADATA",
-              ":pkPrefix": "VACANCY#",
-            },
-          }),
-        );
+    // 2. Fetch all vacancies using GSI1 (Query is much faster and cheaper)
+    let vacanciesItems: any[] = [];
+    let lastEvaluatedKey: any = undefined;
 
-        return (result.Items || [])
-          .map((item) => {
-            const raw = {
-              id: item.PK.replace("VACANCY#", ""),
-              title: item.titulo || item.title,
-              company: item.company || "Empresa",
-              empresaUuid: item.empresaUuid || "",
-              lat: item.ubicacion?.lat || item.lat || 0,
-              lng: item.ubicacion?.lng || item.lng || 0,
-              modalidad: item.modalidad || "Presencial",
-              salario: item.salario || 0,
-              habilidadesRequeridas: item.habilidadesRequeridas || [],
-              sectores: item.sectores || [],
-              descripcion: item.descripcion || "Sin descripción",
-              pdfUrl: item.pdfUrl || "",
-              estado: item.estado || "Activa",
-              createdAt: item.fechaCreacion || item.createdAt,
-            };
-            return enrichJobItem(raw);
-          })
-          .filter((j) => {
-            if (j.estado === "CERRADA") return false;
-            if (suspendedCompanies.has(j.empresaUuid)) return false;
-            return true;
-          });
-      },
-    );
+    do {
+      const result = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: "GSI1",
+          KeyConditionExpression: "GSI1PK = :gsiPk",
+          ExpressionAttributeValues: {
+            ":gsiPk": "VACANCIES",
+          },
+          ScanIndexForward: false, // Newest first
+          ExclusiveStartKey: lastEvaluatedKey,
+        }),
+      );
+      if (result.Items) {
+        vacanciesItems.push(...result.Items);
+      }
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    let items = vacanciesItems
+      .map((item) => {
+        const raw = {
+          id: item.PK.replace("VACANCY#", ""),
+          title: item.titulo || item.title,
+          company: item.company || "Empresa",
+          empresaUuid: item.empresaUuid || "",
+          lat: item.ubicacion?.lat || item.lat || 0,
+          lng: item.ubicacion?.lng || item.lng || 0,
+          modalidad: item.modalidad || "Presencial",
+          salario: item.salario || 0,
+          salarioMinimo: item.salarioMinimo || 0,
+          salarioMaximo: item.salarioMaximo || 0,
+          habilidadesRequeridas: item.habilidadesRequeridas || [],
+          sectores: item.sectores || [],
+          descripcion: item.descripcion || "Sin descripción",
+          pdfUrl: item.pdfUrl || "",
+          aptitudes: item.aptitudes || "",
+          experienciaAnos: item.experienciaAnos || 0,
+          vacantesDisponibles: item.vacantesDisponibles
+            ? Number(item.vacantesDisponibles)
+            : 1,
+          maxPostulantes: item.maxPostulantes
+            ? Number(item.maxPostulantes)
+            : null,
+          estado: item.estado || "Activa",
+          createdAt: item.fechaCreacion || item.createdAt,
+        };
+        return enrichJobItem(raw);
+      })
+      .filter((j) => {
+        if (j.estado === "CERRADA") return false;
+        if (suspendedCompanies.has(j.empresaUuid)) return false;
+
+        // Manual search filters
+        if (q) {
+          const searchRegex = new RegExp(q, "i");
+          if (
+            !searchRegex.test(j.title) &&
+            !searchRegex.test(j.company) &&
+            !searchRegex.test(j.descripcion)
+          ) {
+            return false;
+          }
+        }
+        if (modalidad && j.modalidad !== modalidad) {
+          return false;
+        }
+        return true;
+      });
 
     const hasSearchParams = Boolean(q || modalidad || page || limit);
-    const bodyContent = hasSearchParams
-      ? {
-          data: searchResult.hits,
-          total: searchResult.total,
-          page: searchResult.page,
-          totalPages: searchResult.totalPages,
-          source: searchResult.source,
-        }
-      : searchResult.hits;
+    let bodyContent: any = items;
+
+    if (hasSearchParams) {
+      const p = page || 1;
+      const l = limit || 20;
+      const total = items.length;
+      const totalPages = Math.ceil(total / l);
+      items = items.slice((p - 1) * l, p * l);
+
+      bodyContent = {
+        data: items,
+        total,
+        page: p,
+        totalPages,
+        source: "dynamodb",
+      };
+    }
 
     return {
       statusCode: 200,
@@ -228,10 +267,18 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       lng: item.ubicacion?.lng || item.lng || 0,
       modalidad: item.modalidad || "Presencial",
       salario: item.salario || 0,
+      salarioMinimo: item.salarioMinimo || 0,
+      salarioMaximo: item.salarioMaximo || 0,
       habilidadesRequeridas: item.habilidadesRequeridas || [],
       sectores: item.sectores || [],
       descripcion: item.descripcion || "Sin descripción",
       pdfUrl: item.pdfUrl || "",
+      aptitudes: item.aptitudes || "",
+      experienciaAnos: item.experienciaAnos || 0,
+      vacantesDisponibles: item.vacantesDisponibles
+        ? Number(item.vacantesDisponibles)
+        : 1,
+      maxPostulantes: item.maxPostulantes ? Number(item.maxPostulantes) : null,
       estado: item.estado || "Activa",
       createdAt: item.fechaCreacion || item.createdAt,
     };
@@ -287,17 +334,27 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
     const vacancyUuid = Math.random().toString(36).substring(2);
+    const now = new Date().toISOString();
     const item = {
       PK: `VACANCY#${vacancyUuid}`,
       SK: "METADATA",
-      empresaUuid: body.empresaUuid || "mock-empresa-uuid",
+      GSI1PK: "VACANCIES",
+      GSI1SK: now,
+      empresaUuid:
+        body.empresaUuid ||
+        (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
+        "",
       titulo: body.title,
       company: body.company || "Empresa",
-      descripcion: body.description || "Sin descripción",
+      descripcion: body.descripcion || "Sin descripción",
       modalidad: body.modalidad || "Presencial",
-      salario: body.salario || 0,
+      salario: body.salario || body.salarioMinimo || 0,
+      salarioMinimo: body.salarioMinimo || body.salario || 0,
+      salarioMaximo: body.salarioMaximo || body.salario || 0,
       habilidadesRequeridas: body.habilidadesRequeridas || [],
       sectores: body.sectores || [],
+      aptitudes: body.aptitudes || "",
+      experienciaAnos: body.experienciaAnos || 0,
       ubicacion: {
         lat: body.lat || 0,
         lng: body.lng || 0,
@@ -305,8 +362,12 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       lat: body.lat || 0,
       lng: body.lng || 0,
       pdfUrl: body.pdfUrl || "",
+      vacantesDisponibles: body.vacantesDisponibles
+        ? Number(body.vacantesDisponibles)
+        : 1,
+      maxPostulantes: body.maxPostulantes ? Number(body.maxPostulantes) : null,
       estado: "Activa",
-      fechaCreacion: new Date().toISOString(),
+      fechaCreacion: now,
     };
     await docClient.send(
       new PutCommand({
@@ -314,6 +375,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
         Item: item,
       }),
     );
+
     return {
       statusCode: 201,
       headers: {
@@ -476,6 +538,8 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
       ContentLength: size,
     });
     const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    const region = process.env.AWS_REGION || "us-east-1";
+    const publicUrl = `http://${bucketName}.s3-website-${region}.amazonaws.com/${key}`;
     return {
       statusCode: 200,
       headers: {
@@ -483,7 +547,7 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
         "Access-Control-Allow-Credentials": true,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ url, key }),
+      body: JSON.stringify({ url, key, publicUrl }),
     };
   } catch (error: unknown) {
     return {
@@ -504,7 +568,7 @@ export const sendNotificationEmail: APIGatewayProxyHandler = async (event) => {
     const { to, subject, message } = body;
     await sesClient.send(
       new SendEmailCommand({
-        Source: "noreply@jobnet-platform.com",
+        Source: "noreply@franciscojgh.com",
         Destination: {
           ToAddresses: [to],
         },
@@ -598,6 +662,10 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       "description",
       "modalidad",
       "salario",
+      "salarioMinimo",
+      "salarioMaximo",
+      "vacantesDisponibles",
+      "maxPostulantes",
       "habilidadesRequeridas",
       "skills",
       "sectores",

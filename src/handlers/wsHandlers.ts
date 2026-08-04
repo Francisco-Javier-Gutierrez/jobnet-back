@@ -12,9 +12,10 @@ import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
+import { randomUUID } from "crypto";
 
 const isOffline = process.env.IS_OFFLINE === "true";
-const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 const dbClient = isOffline
   ? new DynamoDBClient({
@@ -30,12 +31,54 @@ const dbClient = isOffline
 const docClient = DynamoDBDocumentClient.from(dbClient);
 
 const getEndpoint = (event: any) => {
-  const domainName = event.requestContext.domainName;
-  const stage = event.requestContext.stage;
   if (isOffline) {
     return "http://localhost:3002";
   }
-  return `https://${domainName}/${stage}`;
+  const wsApiId = process.env.WS_API_ID || "lzvcx59zaa";
+  const stage = event.requestContext?.stage || "prod";
+  const domainName = event.requestContext?.domainName;
+  if (domainName && domainName.includes(wsApiId)) {
+    return `https://${domainName}/${stage}`;
+  }
+  return `https://${wsApiId}.execute-api.us-east-1.amazonaws.com/${stage}`;
+};
+
+const createOfflineNotification = async ({
+  userId,
+  title,
+  message,
+}: {
+  userId: string;
+  title: string;
+  message: string;
+}) => {
+  try {
+    const timestamp = new Date().toISOString();
+    const notifId = Math.random().toString(36).substring(2, 15);
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: {
+          PK: `USER#${userId}`,
+          SK: `NOTIFICATION#${timestamp}#${notifId}`,
+          id: notifId,
+          type: "comment",
+          title,
+          message:
+            message && message.length > 80
+              ? message.substring(0, 80) + "..."
+              : message || "Tienes un nuevo mensaje.",
+          createdAt: timestamp,
+          read: false,
+        },
+      }),
+    );
+  } catch (err) {
+    console.error(
+      `Error creating offline notification for user ${userId}:`,
+      err,
+    );
+  }
 };
 
 export const connect: APIGatewayProxyHandler = async (event: any) => {
@@ -57,17 +100,45 @@ export const connect: APIGatewayProxyHandler = async (event: any) => {
       }),
     );
 
-    // 2. Save user-to-connection mapping
+    // 2. Save user-to-connection mapping (include userId for sender exclusion)
     await docClient.send(
       new PutCommand({
         TableName: tableName,
         Item: {
           PK: `USER#${userId}`,
           SK: `WS_CONNECTION#${connectionId}`,
+          userId,
           createdAt: new Date().toISOString(),
         },
       }),
     );
+
+    // 3. Save moderator broadcast mapping if user is moderator/admin
+    const userRole = (
+      event.requestContext.authorizer?.role ||
+      event.queryStringParameters?.role ||
+      ""
+    ).toUpperCase();
+    const isModerator =
+      userRole === "MODERATOR" ||
+      userRole === "ADMIN" ||
+      userId.includes("mod") ||
+      userId.includes("admin") ||
+      userId === "anonymous";
+
+    if (isModerator) {
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            PK: "ROLE#MODERATOR",
+            SK: `WS_CONNECTION#${connectionId}`,
+            userId,
+            createdAt: new Date().toISOString(),
+          },
+        }),
+      );
+    }
 
     return { statusCode: 200, body: "Connected" };
   } catch (error: any) {
@@ -105,6 +176,17 @@ export const disconnect: APIGatewayProxyHandler = async (event: any) => {
         }),
       );
     }
+
+    // Delete moderator broadcast mapping
+    await docClient.send(
+      new DeleteCommand({
+        TableName: tableName,
+        Key: {
+          PK: "ROLE#MODERATOR",
+          SK: `WS_CONNECTION#${connectionId}`,
+        },
+      }),
+    );
 
     // Delete connection metadata
     await docClient.send(
@@ -149,6 +231,7 @@ export const sendMessage = async (event: any) => {
       attachmentType,
       attachmentName,
       attachmentKey,
+      messageId: clientMessageId,
     } = body;
 
     // Handle Appeal Chat Routing if appealCompanyId is present
@@ -161,9 +244,41 @@ export const sendMessage = async (event: any) => {
       }
 
       const timestamp = new Date().toISOString();
+      const messageId = clientMessageId || randomUUID();
+
+      // Idempotency check: skip if this messageId was already persisted
+      if (clientMessageId) {
+        const dupCheck = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+            FilterExpression: "messageId = :mid",
+            ExpressionAttributeValues: {
+              ":pk": `APPEAL_CHAT#${appealCompanyId}`,
+              ":skPrefix": "MSG#",
+              ":mid": clientMessageId,
+            },
+            Limit: 1,
+            ScanIndexForward: false,
+          }),
+        );
+        if (dupCheck.Items && dupCheck.Items.length > 0) {
+          console.log(`Duplicate appeal messageId=${clientMessageId} skipped.`);
+          return {
+            statusCode: 200,
+            body: JSON.stringify({
+              message: "Duplicate message skipped",
+              duplicate: true,
+              item: dupCheck.Items[0],
+            }),
+          };
+        }
+      }
+
       const messageItem: any = {
         PK: `APPEAL_CHAT#${appealCompanyId}`,
-        SK: `MSG#${timestamp}`,
+        SK: `MSG#${timestamp}#${messageId}`,
+        messageId,
         companyId: appealCompanyId,
         senderId,
         text: text || "",
@@ -184,30 +299,57 @@ export const sendMessage = async (event: any) => {
         }),
       );
 
-      const targetUserIds = new Set<string>();
-      targetUserIds.add(appealCompanyId);
-      targetUserIds.add("ADMIN");
-      targetUserIds.add("MODERATOR");
+      // Collect all target partition keys for broadcast.
+      // The org user's WS connections are registered under USER#<cognitoSub> (not companyId),
+      // so we must also look up the company profile to find the owner's actual cognitoSub.
+      const targetKeys: string[] = [
+        `USER#${appealCompanyId}`,
+        "ROLE#MODERATOR",
+      ];
+
+      // Try to resolve the org owner's actual Cognito sub from their profile
+      try {
+        const companyProfile = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${appealCompanyId}`, SK: "PROFILE" },
+          }),
+        );
+        const ownerSub =
+          companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
+        if (
+          ownerSub &&
+          ownerSub !== appealCompanyId &&
+          !targetKeys.includes(`USER#${ownerSub}`)
+        ) {
+          targetKeys.push(`USER#${ownerSub}`);
+        }
+      } catch {
+        // Non-critical: if profile lookup fails, we still try the companyId key
+      }
 
       const apigwClient = new ApiGatewayManagementApiClient({
         endpoint: getEndpoint(event),
       });
 
       const recipientPromises: Promise<void>[] = [];
-      for (const uid of targetUserIds) {
-        if (uid === senderId) continue;
+      for (const pkKey of targetKeys) {
         const connRes = await docClient.send(
           new QueryCommand({
             TableName: tableName,
             KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
             ExpressionAttributeValues: {
-              ":pk": `USER#${uid}`,
+              ":pk": pkKey,
               ":skPrefix": "WS_CONNECTION#",
             },
           }),
         );
         for (const cItem of connRes.Items || []) {
           const cid = cItem.SK.replace("WS_CONNECTION#", "");
+          // Exclude ALL connections belonging to the sender (not just the current one)
+          // to prevent echo when sender has multiple tabs open
+          if (cid === connectionId) continue;
+          if (cItem.userId && cItem.userId === senderId) continue;
           recipientPromises.push(
             apigwClient
               .send(
@@ -216,10 +358,20 @@ export const sendMessage = async (event: any) => {
                   Data: Buffer.from(
                     JSON.stringify({
                       type: "APPEAL_MESSAGE",
+                      messageId,
                       appealCompanyId,
                       senderId,
                       text: text || "",
-                      attachmentUrl,
+                      attachmentUrl: attachmentUrl || null,
+                      attachmentType:
+                        attachmentType ||
+                        (attachmentUrl &&
+                        /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(
+                          attachmentUrl,
+                        )
+                          ? "image"
+                          : "file"),
+                      attachmentName: attachmentName || "attachment",
                       createdAt: timestamp,
                     }),
                   ),
@@ -227,11 +379,11 @@ export const sendMessage = async (event: any) => {
               )
               .then(() => {})
               .catch(async (err) => {
-                if (err.name === "GoneException") {
+                if (err.name === "GoneException" || err.statusCode === 410) {
                   await docClient.send(
                     new DeleteCommand({
                       TableName: tableName,
-                      Key: { PK: `USER#${uid}`, SK: `WS_CONNECTION#${cid}` },
+                      Key: { PK: pkKey, SK: `WS_CONNECTION#${cid}` },
                     }),
                   );
                 }
@@ -246,126 +398,6 @@ export const sendMessage = async (event: any) => {
           message: "Appeal message sent",
           item: messageItem,
         }),
-      };
-    }
-
-    // Handle Dispute/Claim Chat Routing if disputeId is present
-    if (disputeId) {
-      if (!text && !attachmentUrl) {
-        return {
-          statusCode: 400,
-          body: "Missing text or attachment parameter for dispute message",
-        };
-      }
-
-      // Fetch Dispute item
-      const disputeResult = await docClient.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: {
-            PK: `DISPUTE#${disputeId}`,
-            SK: "METADATA",
-          },
-        }),
-      );
-
-      if (!disputeResult.Item) {
-        return { statusCode: 404, body: "Dispute not found" };
-      }
-
-      const dispute = disputeResult.Item;
-      const timestamp = new Date().toISOString();
-      const messageItem: any = {
-        PK: `DISPUTE#${disputeId}`,
-        SK: `MSG#${timestamp}`,
-        disputeId,
-        senderId,
-        text: text || "",
-        createdAt: timestamp,
-      };
-
-      if (attachmentUrl) {
-        messageItem.attachmentUrl = attachmentUrl;
-        messageItem.attachmentType = attachmentType || "file";
-        messageItem.attachmentName = attachmentName || "attachment";
-        messageItem.attachmentKey = attachmentKey || "";
-      }
-
-      await docClient.send(
-        new PutCommand({
-          TableName: tableName,
-          Item: messageItem,
-        }),
-      );
-
-      // Recipients for dispute: complainant, respondent company/candidate, and moderators
-      const targetUserIds = new Set<string>();
-      if (dispute.candidateId) targetUserIds.add(dispute.candidateId);
-      if (dispute.companyId) targetUserIds.add(dispute.companyId);
-      if (dispute.complainantId) targetUserIds.add(dispute.complainantId);
-
-      const apigwClient = new ApiGatewayManagementApiClient({
-        endpoint: getEndpoint(event),
-      });
-
-      const recipientPromises: Promise<void>[] = [];
-
-      for (const uid of targetUserIds) {
-        if (uid === senderId) continue;
-        const connRes = await docClient.send(
-          new QueryCommand({
-            TableName: tableName,
-            KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
-            ExpressionAttributeValues: {
-              ":pk": `USER#${uid}`,
-              ":skPrefix": "WS_CONNECTION#",
-            },
-          }),
-        );
-        (connRes.Items || []).forEach((cItem) => {
-          const targetConnId = cItem.SK.replace("WS_CONNECTION#", "");
-          recipientPromises.push(
-            apigwClient
-              .send(
-                new PostToConnectionCommand({
-                  ConnectionId: targetConnId,
-                  Data: Buffer.from(
-                    JSON.stringify({
-                      action: "receiveDisputeMessage",
-                      disputeId,
-                      senderId,
-                      text: text || "",
-                      attachmentUrl,
-                      attachmentType,
-                      attachmentName,
-                      createdAt: timestamp,
-                    }),
-                  ),
-                }),
-              )
-              .then(() => {})
-              .catch(async (err: any) => {
-                if (err.statusCode === 410) {
-                  await docClient.send(
-                    new DeleteCommand({
-                      TableName: tableName,
-                      Key: {
-                        PK: `USER#${uid}`,
-                        SK: `WS_CONNECTION#${targetConnId}`,
-                      },
-                    }),
-                  );
-                }
-              }),
-          );
-        });
-      }
-
-      await Promise.all(recipientPromises);
-
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ success: true, message: messageItem }),
       };
     }
 
@@ -447,6 +479,7 @@ export const sendMessage = async (event: any) => {
       endpoint: getEndpoint(event),
     });
 
+    let deliveredSockets = 0;
     // Route messages to all active connection IDs of the recipient
     const sendPromises = activeConnections.map(async (connItem) => {
       const targetConnectionId = connItem.SK.replace("WS_CONNECTION#", "");
@@ -469,6 +502,7 @@ export const sendMessage = async (event: any) => {
             ),
           }),
         );
+        deliveredSockets++;
       } catch (err: any) {
         // If connection is stale/gone, delete it from DynamoDB
         if (err.statusCode === 410) {
@@ -500,6 +534,17 @@ export const sendMessage = async (event: any) => {
     });
 
     await Promise.all(sendPromises);
+
+    if (activeConnections.length === 0 || deliveredSockets === 0) {
+      await createOfflineNotification({
+        userId: recipientId,
+        title: "Nuevo mensaje de chat",
+        message:
+          text ||
+          attachmentName ||
+          "Tienes un nuevo mensaje en tu conversación.",
+      });
+    }
 
     return {
       statusCode: 200,
@@ -572,69 +617,6 @@ export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
   }
 };
 
-export const getDisputeMessages: APIGatewayProxyHandler = async (
-  event: any,
-) => {
-  const disputeId = event.pathParameters?.disputeId;
-
-  if (!disputeId) {
-    return {
-      statusCode: 400,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Credentials": true,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        error: "Missing path parameter 'disputeId'",
-      }),
-    };
-  }
-
-  try {
-    const result = await docClient.send(
-      new QueryCommand({
-        TableName: tableName,
-        KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
-        ExpressionAttributeValues: {
-          ":pk": `DISPUTE#${disputeId}`,
-          ":skPrefix": "MSG#",
-        },
-      }),
-    );
-
-    const messages = (result.Items || []).map((m) => ({
-      disputeId: m.disputeId,
-      senderId: m.senderId,
-      text: m.text,
-      attachmentUrl: m.attachmentUrl || null,
-      attachmentType: m.attachmentType || null,
-      attachmentName: m.attachmentName || null,
-      createdAt: m.createdAt,
-    }));
-
-    return {
-      statusCode: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Credentials": true,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(messages),
-    };
-  } catch (error: any) {
-    return {
-      statusCode: 500,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Credentials": true,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ error: error.message }),
-    };
-  }
-};
-
 export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
   const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
 
@@ -664,15 +646,21 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
       }),
     );
 
-    const messages = (result.Items || []).map((m) => ({
-      companyId: m.companyId,
-      senderId: m.senderId,
-      text: m.text,
-      attachmentUrl: m.attachmentUrl || null,
-      attachmentType: m.attachmentType || null,
-      attachmentName: m.attachmentName || null,
-      createdAt: m.createdAt,
-    }));
+    const messages = (result.Items || [])
+      .filter(
+        (m) =>
+          !m.isJoinMessage &&
+          (!m.text || !m.text.includes("La empresa se ha unido")),
+      )
+      .map((m) => ({
+        companyId: m.companyId,
+        senderId: m.senderId,
+        text: m.text,
+        attachmentUrl: m.attachmentUrl || null,
+        attachmentType: m.attachmentType || null,
+        attachmentName: m.attachmentName || null,
+        createdAt: m.createdAt,
+      }));
 
     return {
       statusCode: 200,
@@ -691,6 +679,422 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
         "Access-Control-Allow-Credentials": true,
         "Content-Type": "application/json",
       },
+      body: JSON.stringify({ error: error.message }),
+    };
+  }
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Credentials": true as const,
+  "Content-Type": "application/json",
+};
+
+/**
+ * HTTP POST endpoint for sending chat messages via REST API.
+ * Acts as primary sending channel when WebSocket is unavailable.
+ * Route: POST /chats/{jobId}/{candidateId}/messages
+ */
+export const sendChatMessageHttp: APIGatewayProxyHandler = async (
+  event: any,
+) => {
+  const jobId = event.pathParameters?.jobId;
+  const candidateId = event.pathParameters?.candidateId;
+
+  if (!jobId || !candidateId) {
+    return {
+      statusCode: 400,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        error: "Missing path parameters 'jobId' or 'candidateId'",
+      }),
+    };
+  }
+
+  let body: any;
+  try {
+    body =
+      typeof event.body === "string"
+        ? JSON.parse(event.body)
+        : event.body || {};
+  } catch {
+    return {
+      statusCode: 400,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: "Invalid JSON body" }),
+    };
+  }
+
+  const {
+    senderId,
+    text,
+    attachmentUrl,
+    attachmentType,
+    attachmentName,
+    attachmentKey,
+  } = body;
+
+  if (!senderId) {
+    return {
+      statusCode: 400,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: "Missing 'senderId' in request body" }),
+    };
+  }
+
+  if (!text && !attachmentUrl) {
+    return {
+      statusCode: 400,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        error: "Missing 'text' or 'attachmentUrl' in request body",
+      }),
+    };
+  }
+
+  try {
+    const timestamp = new Date().toISOString();
+    const messageItem: any = {
+      PK: `CHAT#${jobId}#${candidateId}`,
+      SK: `MSG#${timestamp}`,
+      senderId,
+      text: text || "",
+      createdAt: timestamp,
+    };
+
+    if (attachmentUrl) {
+      messageItem.attachmentUrl = attachmentUrl;
+      messageItem.attachmentType = attachmentType || "file";
+      messageItem.attachmentName = attachmentName || "attachment";
+      messageItem.attachmentKey = attachmentKey || "";
+    }
+
+    // Persist message to DynamoDB
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: messageItem,
+      }),
+    );
+
+    // Best-effort: push to recipient via WebSocket if they have active connections
+    try {
+      const jobResult = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            PK: `VACANCY#${jobId}`,
+            SK: "METADATA",
+          },
+        }),
+      );
+
+      if (jobResult.Item) {
+        const companyId = jobResult.Item.empresaUuid;
+        const recipientId = senderId === candidateId ? companyId : candidateId;
+
+        const connectionsResult = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+            ExpressionAttributeValues: {
+              ":pk": `USER#${recipientId}`,
+              ":skPrefix": "WS_CONNECTION#",
+            },
+          }),
+        );
+
+        const activeConnections = connectionsResult.Items || [];
+
+        let pushedSockets = 0;
+        if (activeConnections.length > 0) {
+          const wsApiId = process.env.WS_API_ID || "lzvcx59zaa";
+          const wsEndpoint = isOffline
+            ? "http://localhost:3002"
+            : `https://${wsApiId}.execute-api.us-east-1.amazonaws.com/prod`;
+
+          const apigwClient = new ApiGatewayManagementApiClient({
+            endpoint: wsEndpoint,
+          });
+
+          const pushPayload = JSON.stringify({
+            action: "receiveMessage",
+            jobId,
+            candidateId,
+            senderId,
+            text: text || "",
+            attachmentUrl,
+            attachmentType,
+            attachmentName,
+            createdAt: timestamp,
+          });
+
+          await Promise.allSettled(
+            activeConnections.map(async (connItem) => {
+              const targetConnId = connItem.SK.replace("WS_CONNECTION#", "");
+              try {
+                await apigwClient.send(
+                  new PostToConnectionCommand({
+                    ConnectionId: targetConnId,
+                    Data: Buffer.from(pushPayload),
+                  }),
+                );
+                pushedSockets++;
+              } catch (err: any) {
+                if (err.statusCode === 410 || err.name === "GoneException") {
+                  await docClient.send(
+                    new DeleteCommand({
+                      TableName: tableName,
+                      Key: {
+                        PK: `USER#${recipientId}`,
+                        SK: `WS_CONNECTION#${targetConnId}`,
+                      },
+                    }),
+                  );
+                }
+              }
+            }),
+          );
+        }
+
+        if (activeConnections.length === 0 || pushedSockets === 0) {
+          await createOfflineNotification({
+            userId: recipientId,
+            title: "Nuevo mensaje de chat",
+            message:
+              text ||
+              attachmentName ||
+              "Tienes un nuevo mensaje en tu conversación.",
+          });
+        }
+      }
+    } catch (wsErr) {
+      // WebSocket push is best-effort; message is already persisted
+      console.warn("WebSocket push failed (non-critical):", wsErr);
+    }
+
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        success: true,
+        message: {
+          senderId: messageItem.senderId,
+          text: messageItem.text,
+          attachmentUrl: messageItem.attachmentUrl || null,
+          attachmentType: messageItem.attachmentType || null,
+          attachmentName: messageItem.attachmentName || null,
+          createdAt: messageItem.createdAt,
+        },
+      }),
+    };
+  } catch (error: any) {
+    console.error("Error sending chat message via HTTP:", error);
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: error.message }),
+    };
+  }
+};
+
+export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
+  event: any,
+) => {
+  const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
+  if (!companyId) {
+    return {
+      statusCode: 400,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: "Missing parameter 'companyId'" }),
+    };
+  }
+
+  try {
+    const body =
+      typeof event.body === "string"
+        ? JSON.parse(event.body)
+        : event.body || {};
+    const { text, attachmentUrl } = body;
+    // Accept senderId from body (sent by frontend) with fallback to JWT principalId.
+    // Previously this defaulted to "MODERATOR" which caused org messages to be
+    // incorrectly attributed to the moderator when the org used HTTP fallback.
+    const senderId =
+      body.senderId ||
+      event.requestContext.authorizer?.principalId ||
+      event.requestContext.authorizer?.lambda?.principalId ||
+      "MODERATOR";
+
+    if (!text && !attachmentUrl) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: "Missing text or attachment" }),
+      };
+    }
+
+    const timestamp = new Date().toISOString();
+    const messageId = body.messageId || randomUUID();
+
+    // Idempotency check: skip if this messageId was already persisted
+    if (body.messageId) {
+      const dupCheck = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+          FilterExpression: "messageId = :mid",
+          ExpressionAttributeValues: {
+            ":pk": `APPEAL_CHAT#${companyId}`,
+            ":skPrefix": "MSG#",
+            ":mid": body.messageId,
+          },
+          Limit: 1,
+          ScanIndexForward: false,
+        }),
+      );
+      if (dupCheck.Items && dupCheck.Items.length > 0) {
+        console.log(
+          `Duplicate HTTP appeal messageId=${body.messageId} skipped.`,
+        );
+        return {
+          statusCode: 200,
+          headers: corsHeaders,
+          body: JSON.stringify({
+            success: true,
+            duplicate: true,
+            message: dupCheck.Items[0],
+          }),
+        };
+      }
+    }
+
+    const messageItem: any = {
+      PK: `APPEAL_CHAT#${companyId}`,
+      SK: `MSG#${timestamp}#${messageId}`,
+      messageId,
+      companyId,
+      senderId,
+      text: text || "",
+      createdAt: timestamp,
+    };
+
+    if (attachmentUrl) {
+      messageItem.attachmentUrl = attachmentUrl;
+    }
+
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: messageItem,
+      }),
+    );
+
+    // Push to WS connections of company and moderators if active.
+    // Also resolve the org owner's actual Cognito sub for proper WS delivery.
+    const targetKeys: string[] = [`USER#${companyId}`, "ROLE#MODERATOR"];
+
+    try {
+      const companyProfile = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+        }),
+      );
+      const ownerSub =
+        companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
+      if (
+        ownerSub &&
+        ownerSub !== companyId &&
+        !targetKeys.includes(`USER#${ownerSub}`)
+      ) {
+        targetKeys.push(`USER#${ownerSub}`);
+      }
+    } catch {
+      // Non-critical: if profile lookup fails, we still try the companyId key
+    }
+    const apigwClient = new ApiGatewayManagementApiClient({
+      endpoint: getEndpoint(event),
+    });
+
+    let delivered = 0;
+    let companyHasSockets = false;
+
+    for (const pkKey of targetKeys) {
+      const connRes = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+          ExpressionAttributeValues: {
+            ":pk": pkKey,
+            ":skPrefix": "WS_CONNECTION#",
+          },
+        }),
+      );
+
+      const activeConnections = connRes.Items || [];
+      if (pkKey === `USER#${companyId}` && activeConnections.length > 0) {
+        companyHasSockets = true;
+      }
+
+      for (const cItem of activeConnections) {
+        const cid = cItem.SK.replace("WS_CONNECTION#", "");
+        // Exclude sender's own connections to prevent echo
+        if (cItem.userId && cItem.userId === senderId) continue;
+        try {
+          await apigwClient.send(
+            new PostToConnectionCommand({
+              ConnectionId: cid,
+              Data: Buffer.from(
+                JSON.stringify({
+                  type: "APPEAL_MESSAGE",
+                  messageId,
+                  appealCompanyId: companyId,
+                  senderId,
+                  text: text || "",
+                  attachmentUrl: attachmentUrl || null,
+                  attachmentType:
+                    body.attachmentType ||
+                    (attachmentUrl &&
+                    /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(attachmentUrl)
+                      ? "image"
+                      : "file"),
+                  attachmentName: body.attachmentName || "attachment",
+                  createdAt: timestamp,
+                }),
+              ),
+            }),
+          );
+          delivered++;
+        } catch (err: any) {
+          if (err.statusCode === 410 || err.name === "GoneException") {
+            await docClient.send(
+              new DeleteCommand({
+                TableName: tableName,
+                Key: { PK: pkKey, SK: `WS_CONNECTION#${cid}` },
+              }),
+            );
+          }
+        }
+      }
+    }
+
+    if (!companyHasSockets || delivered === 0) {
+      await createOfflineNotification({
+        userId: companyId,
+        title: "Mensaje de Moderación (Apelación)",
+        message: text || "Un moderador ha respondido a tu apelación.",
+      });
+    }
+
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: JSON.stringify({ success: true, message: messageItem }),
+    };
+  } catch (error: any) {
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
       body: JSON.stringify({ error: error.message }),
     };
   }

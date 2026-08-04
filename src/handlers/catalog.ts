@@ -22,7 +22,7 @@ const dbClient = isOffline
   : new DynamoDBClient({});
 
 const docClient = DynamoDBDocumentClient.from(dbClient);
-const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 export const getCatalog: APIGatewayProxyHandler = async () => {
   try {

@@ -46,7 +46,6 @@ import {
   defaultRoute,
   sendMessage,
   getChatMessages,
-  getDisputeMessages,
 } from "./wsHandlers";
 
 describe("wsHandlers", () => {
@@ -105,7 +104,7 @@ describe("wsHandlers", () => {
       const response = await disconnect(event, {} as any, () => {});
       expect(response.statusCode).toBe(200);
       expect(response.body).toBe("Disconnected");
-      expect(mockDynamoSend).toHaveBeenCalledTimes(3);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(4);
     });
 
     it("should handle disconnect gracefully if connection lookup is empty", async () => {
@@ -120,7 +119,7 @@ describe("wsHandlers", () => {
 
       const response = await disconnect(event, {} as any, () => {});
       expect(response.statusCode).toBe(200);
-      expect(mockDynamoSend).toHaveBeenCalledTimes(2);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(3);
     });
 
     it("should return 500 on database error during disconnect", async () => {
@@ -272,7 +271,7 @@ describe("wsHandlers", () => {
 
       const response = await sendMessage(event);
       expect(response.statusCode).toBe(200);
-      expect(mockDynamoSend).toHaveBeenCalledTimes(5);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(6);
     });
 
     it("should return 500 on internal message routing error", async () => {
@@ -293,44 +292,6 @@ describe("wsHandlers", () => {
       const response = await sendMessage(event);
       expect(response.statusCode).toBe(500);
       expect(response.body).toContain("Routing failed");
-    });
-
-    it("should route dispute messages to participants and active connections", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "DISPUTE#disp-1",
-          SK: "METADATA",
-          candidateId: "cand-1",
-          companyId: "company-1",
-          complainantId: "cand-1",
-        },
-      }); // Get dispute
-      mockDynamoSend.mockResolvedValueOnce({}); // Put dispute message
-      mockDynamoSend.mockResolvedValueOnce({
-        Items: [{ SK: "WS_CONNECTION#conn-company" }],
-      }); // Query active connections for company-1
-
-      mockApiGwSend.mockResolvedValueOnce({});
-
-      const event = {
-        requestContext: {
-          connectionId: "conn-1",
-          authorizer: { principalId: "cand-1" },
-          domainName: "localhost",
-          stage: "dev",
-        },
-        body: JSON.stringify({
-          disputeId: "disp-1",
-          text: "Additional evidence",
-          attachmentUrl: "https://s3.amazonaws.com/proof.pdf",
-          attachmentType: "pdf",
-          attachmentName: "proof.pdf",
-        }),
-      } as any;
-
-      const response = await sendMessage(event);
-      expect(response.statusCode).toBe(200);
-      expect(JSON.parse(response.body).success).toBe(true);
     });
   });
 
@@ -380,35 +341,6 @@ describe("wsHandlers", () => {
       const response = await getChatMessages(event, {} as any, () => {});
       expect(response.statusCode).toBe(500);
       expect(JSON.parse(response.body).error).toBe("History fetch error");
-    });
-  });
-
-  describe("getDisputeMessages", () => {
-    it("should return 400 if disputeId is missing", async () => {
-      const event = { pathParameters: {} } as any;
-      const response = await getDisputeMessages(event, {} as any, () => {});
-      expect(response.statusCode).toBe(400);
-    });
-
-    it("should return dispute messages list", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          {
-            disputeId: "disp-1",
-            senderId: "cand-1",
-            text: "Problem detail",
-            createdAt: "2026-07-24T10:00:00Z",
-          },
-        ],
-      });
-
-      const event = { pathParameters: { disputeId: "disp-1" } } as any;
-      const response = await getDisputeMessages(event, {} as any, () => {});
-      expect(response.statusCode).toBe(200);
-
-      const body = JSON.parse(response.body);
-      expect(body).toHaveLength(1);
-      expect(body[0].text).toBe("Problem detail");
     });
   });
 });

@@ -137,6 +137,8 @@ export function enrichJobItem(
     sectores: item.sectores || [],
     descripcion: item.descripcion || "Sin descripción",
     pdfUrl: item.pdfUrl || "",
+    aptitudes: item.aptitudes || "",
+    experienciaAnos: item.experienciaAnos || 0,
     estado,
     estadoBadge: getEstadoBadge(estado),
     ubicacionFormatted: formatUbicacion(item),
@@ -187,6 +189,19 @@ export function enrichProfileItem(item: any): any {
     habilidades,
     habilidadesCertificadas,
     portafolio,
+    documentosAdicionales:
+      item.documentosAdicionales || item.documentosProfesionales || [],
+    documentosProfesionales:
+      item.documentosProfesionales || item.documentosAdicionales || [],
+    links:
+      item.links ||
+      (item.enlacesWeb && typeof item.enlacesWeb === "object"
+        ? Object.entries(item.enlacesWeb).map(([label, url]) => ({
+            label,
+            url,
+          }))
+        : []),
+    enlacesWeb: item.enlacesWeb || item.links || {},
     fotoPerfil: item.fotoPerfil || item.avatarUrl || "",
     cvUrl: item.cvUrl || item.cvPdfUrl || "",
     cvName: item.cvName || (item.cvUrl ? "Currículum.pdf" : ""),

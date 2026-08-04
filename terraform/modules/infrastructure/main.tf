@@ -101,6 +101,7 @@ resource "aws_cognito_user_group" "group_candidato" {
 
 resource "aws_cognito_user_group" "group_organizacion" {
   name         = "ORGANIZACION"
+  description  = "Grupo de Organizaciones de JobNet"
   user_pool_id = aws_cognito_user_pool.pool.id
 }
 
@@ -115,10 +116,17 @@ resource "aws_cognito_user_group" "group_moderator" {
 }
 
 resource "aws_dynamodb_table" "jobs" {
-  name         = "jobnet-jobs-${var.environment}"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "PK"
-  range_key    = "SK"
+  name             = "jobnet-jobs-${var.environment}"
+  billing_mode     = "PAY_PER_REQUEST"
+  hash_key         = "PK"
+  range_key        = "SK"
+  stream_enabled   = true
+  stream_view_type = "NEW_AND_OLD_IMAGES"
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
 
   attribute {
     name = "PK"
@@ -190,6 +198,7 @@ resource "aws_s3_bucket_policy" "uploads_policy" {
 }
 
 resource "aws_opensearch_domain" "search" {
+  count          = var.enable_opensearch ? 1 : 0
   domain_name    = "jobnet-search-${var.environment}"
   engine_version = "OpenSearch_2.11"
 

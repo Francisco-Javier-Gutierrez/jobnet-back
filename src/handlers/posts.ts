@@ -25,7 +25,7 @@ const dbClient = isOffline
   : new DynamoDBClient({});
 
 const docClient = DynamoDBDocumentClient.from(dbClient);
-const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 const headers = {
   "Access-Control-Allow-Origin": "*",
@@ -64,6 +64,8 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
           author: item.author || "Anónimo",
           role: item.role || "Candidato",
           authorUuid: item.authorUuid || "",
+          authorAvatar: item.authorAvatar || item.fotoPerfil || undefined,
+          fotoPerfil: item.fotoPerfil || item.authorAvatar || undefined,
           content: item.content || "",
           media: item.media || undefined,
           pdfUrl: item.pdfUrl || undefined,
@@ -100,6 +102,46 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
           });
         }
       }
+    }
+
+    // Third pass: enrich missing authorAvatar by querying user profiles in DynamoDB
+    const authorUuids = Array.from(
+      new Set(
+        Object.values(postsMap)
+          .map((p: any) => p.authorUuid)
+          .filter((id) => id && id !== "anonymous"),
+      ),
+    );
+
+    if (authorUuids.length > 0) {
+      const profileResults = await Promise.all(
+        authorUuids.map((uid) =>
+          docClient
+            .send(
+              new GetCommand({
+                TableName: tableName,
+                Key: { PK: `USER#${uid}`, SK: "PROFILE" },
+              }),
+            )
+            .catch(() => ({ Item: null })),
+        ),
+      );
+
+      const profileMap: Record<string, string> = {};
+      profileResults.forEach((res) => {
+        if (res.Item && res.Item.PK) {
+          const uid = res.Item.PK.replace("USER#", "");
+          profileMap[uid] =
+            res.Item.fotoPerfil || res.Item.avatarUrl || res.Item.avatar || "";
+        }
+      });
+
+      Object.values(postsMap).forEach((p: any) => {
+        if (!p.authorAvatar && p.authorUuid && profileMap[p.authorUuid]) {
+          p.authorAvatar = profileMap[p.authorUuid];
+          p.fotoPerfil = profileMap[p.authorUuid];
+        }
+      });
     }
 
     // Convert map to array and sort by createdAt descending
@@ -146,7 +188,17 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
 export const createPost: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
-    const { author, role, authorUuid, content, media, pdfUrl, pdfName } = body;
+    const {
+      author,
+      role,
+      authorUuid,
+      authorAvatar,
+      fotoPerfil,
+      content,
+      media,
+      pdfUrl,
+      pdfName,
+    } = body;
 
     if (!content && !media && !pdfUrl) {
       return {
@@ -167,11 +219,15 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
       author: author || "Usuario JobNet",
       role: role || "Candidato",
       authorUuid: authorUuid || "anonymous",
+      authorAvatar: authorAvatar || fotoPerfil || null,
+      fotoPerfil: fotoPerfil || authorAvatar || null,
       content: content || "",
       media: media || null,
       pdfUrl: pdfUrl || null,
       pdfName: pdfName || null,
       createdAt,
+      GSI1PK: `POSTS#${authorUuid || "anonymous"}`,
+      GSI1SK: `POST#${postUuid}`,
     };
 
     // Remove null values to comply with NoSQL DynamoDB rules
@@ -538,6 +594,8 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
           TableName: tableName,
           Item: {
             ...key,
+            GSI1PK: `BOOKMARK#${userUuid}`,
+            GSI1SK: `POST#${postId}`,
             fechaInteraccion: new Date().toISOString(),
           },
         }),

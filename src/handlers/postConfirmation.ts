@@ -142,7 +142,7 @@ export const handler: PostConfirmationTriggerHandler = async (
   // 4. RF-74: Restricción de Registro por Dominios Bloqueados
   if (tipoUsuario === "ORGANIZACION" && email && email.includes("@")) {
     const domain = email.split("@")[1].toLowerCase().trim();
-    const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+    const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
     try {
       const blockedRes = await docClient.send(
         new GetCommand({

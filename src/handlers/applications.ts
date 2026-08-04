@@ -35,7 +35,7 @@ const sesClient = isOffline
     })
   : new SESClient({});
 
-const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-dev";
+const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 const VALID_STATUSES = [
   "PENDIENTE",
@@ -78,6 +78,55 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
         headers,
         body: JSON.stringify({ error: "Missing required field 'candidateId'" }),
       };
+    }
+
+    // Verify vacancy maxPostulantes limit
+    const jobResult = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${jobId}`,
+          SK: "METADATA",
+        },
+      }),
+    );
+
+    if (jobResult.Item) {
+      if (jobResult.Item.estado === "CERRADA") {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error: "Esta vacante se encuentra cerrada a nuevas postulaciones.",
+          }),
+        };
+      }
+
+      const maxPostulantes = jobResult.Item.maxPostulantes;
+      if (maxPostulantes && Number(maxPostulantes) > 0) {
+        const applicantsResult = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+            ExpressionAttributeValues: {
+              ":pk": `JOB#${jobId}`,
+              ":skPrefix": "APP#",
+            },
+          }),
+        );
+
+        const currentCount = (applicantsResult.Items || []).length;
+        if (currentCount >= Number(maxPostulantes)) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              error:
+                "Se ha alcanzado el límite máximo de postulantes para esta vacante.",
+            }),
+          };
+        }
+      }
     }
 
     const appliedAt = new Date().toISOString();
@@ -125,7 +174,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
           PK: `CHAT#${jobId}#${candidateId}`,
           SK: `MSG#${chatTimestamp}`,
           senderId: candidateId,
-          text: `Me he postulado a esta vacante. Adjunto mi CV: ${coverLetter || "No adjunto"}`,
+          text: coverLetter || "Me he postulado a esta vacante.",
           createdAt: chatTimestamp,
         },
       }),
@@ -304,6 +353,17 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
       };
     }
 
+    if (existing.Item.status === "ACEPTADO" && status === "RECHAZADO") {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error:
+            "No se puede descartar a un candidato que ya ha sido aceptado.",
+        }),
+      };
+    }
+
     const updatedAt = new Date().toISOString();
 
     // Update employer-view item
@@ -373,18 +433,23 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
       jobDetail.Item?.titulo || jobDetail.Item?.title || "Vacante";
     const companyName = jobDetail.Item?.company || "Empresa";
 
-    if (candidateEmail) {
-      if (status === "RECHAZADO") {
-        // Send rejection email (RF-43)
-        const reasonStr =
-          motivoRechazo || "No se especificó un motivo particular.";
+    let notifTitle = "";
+    let notifMessage = "";
+
+    if (status === "RECHAZADO") {
+      const reasonStr =
+        motivoRechazo || "No se especificó un motivo particular.";
+      notifTitle = `Actualización de Postulación: ${jobTitle}`;
+      notifMessage = `Tu postulación para la vacante "${jobTitle}" en "${companyName}" ha sido descartada. Motivo: ${reasonStr}`;
+
+      if (candidateEmail) {
         await sesClient
           .send(
             new SendEmailCommand({
-              Source: "noreply@jobnet-platform.com",
+              Source: "noreply@franciscojgh.com",
               Destination: { ToAddresses: [candidateEmail] },
               Message: {
-                Subject: { Data: `Actualización de Postulación: ${jobTitle}` },
+                Subject: { Data: notifTitle },
                 Body: {
                   Text: {
                     Data: `Hola,\n\nTe informamos que tu postulación para la vacante "${jobTitle}" en "${companyName}" ha sido descartada.\n\nMotivo del descarte:\n${reasonStr}\n\nAgradecemos mucho tu interés y participación en el proceso.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
@@ -394,18 +459,22 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
             }),
           )
           .catch((err) => console.error("Error sending rejection email:", err));
-      } else if (status === "ENTREVISTA") {
-        // Send interview scheduling email (RF-44)
-        const detailsStr =
-          detallesEntrevista ||
-          "El equipo de reclutamiento se pondrá en contacto pronto para definir hora y canal.";
+      }
+    } else if (status === "ENTREVISTA") {
+      const detailsStr =
+        detallesEntrevista ||
+        "El equipo de reclutamiento se pondrá en contacto pronto para definir hora y canal.";
+      notifTitle = `Invitación a Entrevista: ${jobTitle}`;
+      notifMessage = `¡Felicidades! Tu postulación para "${jobTitle}" ha avanzado a entrevistas. Detalles: ${detailsStr}`;
+
+      if (candidateEmail) {
         await sesClient
           .send(
             new SendEmailCommand({
-              Source: "noreply@jobnet-platform.com",
+              Source: "noreply@franciscojgh.com",
               Destination: { ToAddresses: [candidateEmail] },
               Message: {
-                Subject: { Data: `Invitación a Entrevista: ${jobTitle}` },
+                Subject: { Data: notifTitle },
                 Body: {
                   Text: {
                     Data: `¡Felicidades!\n\nTu postulación para la vacante "${jobTitle}" en "${companyName}" ha avanzado a la fase de entrevistas.\n\nDetalles de la entrevista:\n${detailsStr}\n\nPor favor mantente al pendiente para más indicaciones.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
@@ -416,6 +485,50 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
           )
           .catch((err) => console.error("Error sending interview email:", err));
       }
+    } else if (status === "ACEPTADO") {
+      notifTitle = `¡Fuiste aceptado! Vacante: ${jobTitle}`;
+      notifMessage = `¡Felicidades! Has sido aceptado para la vacante "${jobTitle}" en "${companyName}". El equipo se pondrá en contacto contigo pronto.`;
+
+      if (candidateEmail) {
+        await sesClient
+          .send(
+            new SendEmailCommand({
+              Source: "noreply@franciscojgh.com",
+              Destination: { ToAddresses: [candidateEmail] },
+              Message: {
+                Subject: { Data: notifTitle },
+                Body: {
+                  Text: {
+                    Data: `¡Felicidades!\n\nNos complace informarte que has sido seleccionado para la vacante "${jobTitle}" en "${companyName}".\n\nEl equipo de reclutamiento se pondrá en contacto contigo en breve para los siguientes pasos.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
+                  },
+                },
+              },
+            }),
+          )
+          .catch((err) =>
+            console.error("Error sending acceptance email:", err),
+          );
+      }
+    }
+
+    if (notifTitle && notifMessage) {
+      const notifId = Math.random().toString(36).substring(2, 15);
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            PK: `USER#${candidateId}`,
+            SK: `NOTIFICATION#${updatedAt}#${notifId}`,
+            id: notifId,
+            type: "APPLICATION_UPDATE",
+            title: notifTitle,
+            message: notifMessage,
+            jobId,
+            createdAt: updatedAt,
+            read: false,
+          },
+        }),
+      );
     }
 
     return {
