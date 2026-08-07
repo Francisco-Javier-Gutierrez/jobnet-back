@@ -432,6 +432,39 @@ functions:
       - httpApi:
           path: /posts/{id}/bookmark
           method: post
-
-
-
+  sharePost:
+    handler: src/handlers/posts.sharePost
+    events:
+      - httpApi:
+          path: /posts/{id}/share
+          method: post
+  toggleLikeJob:
+    handler: src/handlers/jobs.toggleLikeJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/like
+          method: post
+  addCommentJob:
+    handler: src/handlers/jobs.addCommentJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/comment
+          method: post
+  deleteCommentJob:
+    handler: src/handlers/jobs.deleteCommentJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/comment/{commentId}
+          method: delete
+  toggleBookmarkJob:
+    handler: src/handlers/jobs.toggleBookmarkJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/bookmark
+          method: post
+  shareJob:
+    handler: src/handlers/jobs.shareJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/share
+          method: post

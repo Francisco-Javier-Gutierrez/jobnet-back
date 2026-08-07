@@ -566,11 +566,47 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
     );
 
     if (!existing.Item) {
-      return {
-        statusCode: 404,
-        headers,
-        body: JSON.stringify({ error: "Incident not found" }),
-      };
+      // Fallback: Si no existe la incidencia, puede que se haya llamado desde la pantalla de Apelaciones
+      // pasando directamente el ID de la vacante. Verificamos si existe la vacante.
+      const vacancyRes = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            PK: `VACANCY#${incidentId}`,
+            SK: "METADATA",
+          },
+        }),
+      );
+
+      if (vacancyRes.Item) {
+        // Creamos una incidencia "ficticia" o de sistema vinculada a esta vacante para que el flujo pueda continuar
+        existing.Item = {
+          PK: `INCIDENT#${incidentId}`,
+          SK: "METADATA",
+          jobId: incidentId,
+          jobTitle: vacancyRes.Item.titulo || "Vacante Sancionada",
+          estatus: "EVALUACION",
+          companyId: vacancyRes.Item.empresaUuid || vacancyRes.Item.companyId,
+          targetType: "VACANTE",
+          targetId: incidentId,
+          reason: "Resolución/Apelación directa iniciada por moderador",
+          fechaCreacion: new Date().toISOString(),
+        };
+
+        // Guardamos esta incidencia para que el UpdateCommand posterior no deje un registro huérfano y malformado
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: existing.Item,
+          }),
+        );
+      } else {
+        return {
+          statusCode: 404,
+          headers,
+          body: JSON.stringify({ error: "Incident not found" }),
+        };
+      }
     }
 
     const incident = existing.Item;
@@ -641,6 +677,14 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
       if (action === "block") {
         // RF-24 Fase 2 — Ejecución del Borrado Lógico de la vacante fraudulenta
         const timestamp = new Date().toISOString();
+
+        await docClient.send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: { PK: `VACANCY_SUSPENSION#${incident.jobId}`, SK: "GRACE_PERIOD" },
+          }),
+        );
+
         await docClient.send(
           new UpdateCommand({
             TableName: tableName,
@@ -708,7 +752,33 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               compProfileRes.Item.email &&
               compProfileRes.Item.email.includes("@")
             ) {
-              const compDomain = compProfileRes.Item.email.split("@")[1];
+              const companyEmail = compProfileRes.Item.email;
+
+              // Send SES Email for Blocked Vacancy
+              await sesClient
+                .send(
+                  new SendEmailCommand({
+                    Source: "noreply@franciscojgh.com",
+                    Destination: {
+                      ToAddresses: [companyEmail],
+                    },
+                    Message: {
+                      Subject: {
+                        Data: `Resolución Desfavorable: Vacante Eliminada`,
+                      },
+                      Body: {
+                        Text: {
+                          Data: `Estimado reclutador,\n\nTras la evaluación de la apelación de su vacante "${incident.jobTitle || 'Sancionada'}", la resolución ha sido en su contra y la vacante ha sido eliminada definitivamente del Job Board por infracción de nuestras normas.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
+                        },
+                      },
+                    },
+                  }),
+                )
+                .catch((err) =>
+                  console.error("Error sending SES block email:", err),
+                );
+
+              const compDomain = companyEmail.split("@")[1];
               await blockCorporateDomain(
                 compDomain,
                 incident.reason || "Suspensión por vacante fraudulenta",
@@ -722,11 +792,37 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             e,
           );
         }
+
+        // Close the appeal chat for the organization
+        if (targetCompanyId) {
+          await docClient.send(
+            new UpdateCommand({
+              TableName: tableName,
+              Key: { PK: `USER#${targetCompanyId}`, SK: "PROFILE" },
+              UpdateExpression: "SET apelacionIniciada = :ai",
+              ExpressionAttributeValues: { ":ai": false },
+            }),
+          );
+        }
       } else if (action === "evaluate") {
         // RF-23 Fase 1 — Pausar vacante para evaluación y notificar oficialmente
         const graceLimit = new Date();
         graceLimit.setDate(graceLimit.getDate() + 15);
         const timestamp = new Date().toISOString();
+        const ttlSeconds = Math.floor(graceLimit.getTime() / 1000);
+
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `VACANCY_SUSPENSION#${incident.jobId}`,
+              SK: "GRACE_PERIOD",
+              jobId: incident.jobId,
+              status: "EVALUACION",
+              ttl: ttlSeconds,
+            },
+          }),
+        );
 
         await docClient.send(
           new UpdateCommand({
@@ -825,6 +921,13 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
       } else if (action === "approve") {
         // Fase 3 — Reactivar vacante (apelación favorable)
         await docClient.send(
+          new DeleteCommand({
+            TableName: tableName,
+            Key: { PK: `VACANCY_SUSPENSION#${incident.jobId}`, SK: "GRACE_PERIOD" },
+          }),
+        );
+
+        await docClient.send(
           new UpdateCommand({
             TableName: tableName,
             Key: {
@@ -839,6 +942,82 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             },
           }),
         );
+
+        // RF-24 Fase 1 — Notificación de Resolución Favorable (Approve)
+        if (targetCompanyId) {
+          const timestamp = new Date().toISOString();
+          const notifId = Math.random().toString(36).substring(2, 15);
+          await docClient.send(
+            new PutCommand({
+              TableName: tableName,
+              Item: {
+                PK: `USER#${targetCompanyId}`,
+                SK: `NOTIFICATION#${timestamp}#${notifId}`,
+                id: notifId,
+                type: "SUSPENSION_CANCELED",
+                title: "Resolución Favorable: Vacante Reactivada",
+                message: `La evaluación de su apelación ha concluido de manera favorable. Su vacante ha sido reactivada y ya se encuentra visible nuevamente en el Job Board.`,
+                createdAt: timestamp,
+                read: false,
+              },
+            }),
+          );
+
+          try {
+            const compProfileRes = await docClient.send(
+              new GetCommand({
+                TableName: tableName,
+                Key: { PK: `USER#${targetCompanyId}`, SK: "PROFILE" },
+              }),
+            );
+
+            if (
+              compProfileRes.Item &&
+              compProfileRes.Item.email &&
+              compProfileRes.Item.email.includes("@")
+            ) {
+              const companyEmail = compProfileRes.Item.email;
+
+              // Send SES Email for Approved Vacancy
+              await sesClient
+                .send(
+                  new SendEmailCommand({
+                    Source: "noreply@franciscojgh.com",
+                    Destination: {
+                      ToAddresses: [companyEmail],
+                    },
+                    Message: {
+                      Subject: {
+                        Data: `Resolución Favorable: Vacante Reactivada`,
+                      },
+                      Body: {
+                        Text: {
+                          Data: `Estimado reclutador,\n\nNos complace informarle que la evaluación de su apelación referente a la vacante "${incident.jobTitle || 'Pausada'}" ha concluido de manera favorable.\n\nSu vacante ha sido reactivada y ya se encuentra visible nuevamente en el Job Board.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
+                        },
+                      },
+                    },
+                  }),
+                )
+                .catch((err) =>
+                  console.error("Error sending SES approve email:", err),
+                );
+            }
+          } catch (e) {
+            console.error("Error sending approve email:", e);
+          }
+        }
+
+        // Close the appeal chat for the organization
+        if (targetCompanyId) {
+          await docClient.send(
+            new UpdateCommand({
+              TableName: tableName,
+              Key: { PK: `USER#${targetCompanyId}`, SK: "PROFILE" },
+              UpdateExpression: "SET apelacionIniciada = :ai",
+              ExpressionAttributeValues: { ":ai": false },
+            }),
+          );
+        }
       }
     } else if (targetCompanyId) {
       // Organization Incident Handling (RF-26)
@@ -1983,6 +2162,68 @@ export const handleSuspensionExpiry = async (event: any) => {
             action: "SUSPENSION_AUTOMATICA_TTL_EXPIRADO",
             reason:
               "Periodo de gracia concluyó sin resolución/apelación favorable. Cuenta suspendida automáticamente.",
+            executorId: "SISTEMA_DYNAMODB_TTL",
+          });
+        }
+      } else if (pk.startsWith("VACANCY_SUSPENSION#") && sk === "GRACE_PERIOD") {
+        const jobId = oldImage.jobId?.S;
+        const status = oldImage.status?.S;
+
+        if (status === "EVALUACION" && jobId) {
+          console.log(
+            `TTL Expired for vacancy ${jobId}. Executing automatic deletion (RF-23).`,
+          );
+          const timestamp = new Date().toISOString();
+
+          await docClient.send(
+            new UpdateCommand({
+              TableName: tableName,
+              Key: { PK: `VACANCY#${jobId}`, SK: "METADATA" },
+              UpdateExpression:
+                "SET estado = :deletedState, suspendida = :s, isDeleted = :del, oculta = :o, deletedAt = :deleted",
+              ExpressionAttributeValues: {
+                ":deletedState": "Eliminada",
+                ":s": true,
+                ":del": true,
+                ":o": true,
+                ":deleted": timestamp,
+              },
+            }),
+          );
+
+          const vacRes = await docClient.send(
+            new GetCommand({
+              TableName: tableName,
+              Key: { PK: `VACANCY#${jobId}`, SK: "METADATA" },
+            }),
+          );
+
+          if (vacRes.Item && vacRes.Item.empresaUuid) {
+            const targetCompanyId = vacRes.Item.empresaUuid;
+            const notifId = Math.random().toString(36).substring(2, 15);
+            await docClient.send(
+              new PutCommand({
+                TableName: tableName,
+                Item: {
+                  PK: `USER#${targetCompanyId}`,
+                  SK: `NOTIFICATION#${timestamp}#${notifId}`,
+                  id: notifId,
+                  type: "SUSPENSION_CONFIRMED",
+                  title: "Resolución Desfavorable: Vacante Eliminada por Expiración",
+                  message: `El periodo de apelación para su vacante ha expirado sin resolución favorable. La vacante ha sido eliminada definitivamente del Job Board por infracción de normas.`,
+                  createdAt: timestamp,
+                  read: false,
+                },
+              }),
+            );
+          }
+
+          await saveAuditLog({
+            targetId: jobId,
+            targetType: "VACANTE",
+            action: "ELIMINACION_AUTOMATICA_TTL_EXPIRADO",
+            reason:
+              "Periodo de gracia concluyó sin apelación favorable. Vacante eliminada automáticamente.",
             executorId: "SISTEMA_DYNAMODB_TTL",
           });
         }

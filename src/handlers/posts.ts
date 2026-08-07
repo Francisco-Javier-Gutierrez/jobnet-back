@@ -71,6 +71,7 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
           pdfUrl: item.pdfUrl || undefined,
           pdfName: item.pdfName || undefined,
           createdAt: item.createdAt || new Date().toISOString(),
+          sharesCount: item.sharesCount || 0,
           likesList: [],
           bookmarksList: [],
           comments: [],
@@ -226,6 +227,7 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
       pdfUrl: pdfUrl || null,
       pdfName: pdfName || null,
       createdAt,
+      sharesCount: 0,
       GSI1PK: `POSTS#${authorUuid || "anonymous"}`,
       GSI1SK: `POST#${postUuid}`,
     };
@@ -607,6 +609,52 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
       statusCode: 200,
       headers,
       body: JSON.stringify({ bookmarked, postId, userUuid }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const sharePost: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la publicación",
+        }),
+      };
+    }
+
+    const result = await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: {
+          PK: `POST#${id}`,
+          SK: "METADATA",
+        },
+        UpdateExpression: "ADD sharesCount :inc",
+        ExpressionAttributeValues: {
+          ":inc": 1,
+        },
+        ReturnValues: "UPDATED_NEW",
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        id,
+        sharesCount: result.Attributes?.sharesCount || 1,
+      }),
     };
   } catch (error: unknown) {
     return {

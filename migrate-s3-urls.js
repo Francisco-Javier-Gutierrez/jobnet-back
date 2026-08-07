@@ -26,16 +26,17 @@ function updateUrlsInObject(obj) {
   const newObj = {};
   for (const [key, val] of Object.entries(obj)) {
     if (typeof val === "string") {
-      if (
-        val.includes(".s3.us-east-1.amazonaws.com/") ||
-        val.includes(".s3.amazonaws.com/")
-      ) {
+      if (val.includes(".s3-website-")) {
         const updatedStr = val.replace(
-          /https:\/\/([^.]+)\.s3(\.[^.]+)?\.amazonaws\.com\//g,
-          "http://$1.s3-website-us-east-1.amazonaws.com/",
+          /http:\/\/([^.]+)\.s3-website-([^.]+)\.amazonaws\.com\//g,
+          "https://$1.s3.$2.amazonaws.com/",
         );
-        newObj[key] = updatedStr;
-        modified = true;
+        if (updatedStr !== val) {
+          newObj[key] = updatedStr;
+          modified = true;
+        } else {
+          newObj[key] = val;
+        }
       } else {
         newObj[key] = val;
       }

@@ -478,6 +478,7 @@ export const getProfileVacancies: APIGatewayProxyHandler = async (event) => {
         pdfUrl: v.pdfUrl || "",
         estado: v.estado || "Activa",
         createdAt: v.fechaCreacion || v.createdAt,
+        sharesCount: v.sharesCount || 0,
       }),
     );
 
@@ -553,6 +554,7 @@ async function enrichPostsWithRelations(
         pdfUrl: post.pdfUrl || undefined,
         pdfName: post.pdfName || undefined,
         createdAt: post.createdAt || new Date().toISOString(),
+        sharesCount: post.sharesCount || 0,
         likesList,
         bookmarksList,
         comments,

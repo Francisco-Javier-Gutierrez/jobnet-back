@@ -7,6 +7,7 @@ import {
   GetCommand,
   UpdateCommand,
   QueryCommand,
+  DeleteCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -151,11 +152,17 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
             : null,
           estado: item.estado || "Activa",
           createdAt: item.fechaCreacion || item.createdAt,
+          sharesCount: item.sharesCount || 0,
+          isDeleted: item.isDeleted || false,
+          oculta: item.oculta || false,
         };
         return enrichJobItem(raw);
       })
       .filter((j) => {
         if (j.estado === "CERRADA") return false;
+        if (j.estado === "Eliminada") return false;
+        if (j.isDeleted) return false;
+        if (j.oculta) return false;
         if (suspendedCompanies.has(j.empresaUuid)) return false;
 
         // Manual search filters
@@ -192,6 +199,47 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
         totalPages,
         source: "dynamodb",
       };
+    }
+
+    // Enrich missing likes, comments and bookmarks per job in the current page slice
+    const enrichedItems = await Promise.all(
+      items.map(async (j) => {
+        try {
+          const res = await docClient.send(
+            new QueryCommand({
+              TableName: tableName,
+              KeyConditionExpression: "PK = :pk",
+              ExpressionAttributeValues: { ":pk": `VACANCY#${j.id}` },
+            }),
+          );
+          const jItems = res.Items || [];
+          j.likesList = [];
+          j.bookmarksList = [];
+          let commentsCount = 0;
+          for (const i of jItems) {
+            if (i.SK.startsWith("LIKE#")) {
+              j.likesList.push(i.SK.replace("LIKE#", ""));
+            } else if (i.SK.startsWith("BOOKMARK#")) {
+              j.bookmarksList.push(i.SK.replace("BOOKMARK#", ""));
+            } else if (i.SK.startsWith("COMMENT#") && !i.isDeleted) {
+              commentsCount++;
+            }
+          }
+          j.likesCount = j.likesList.length;
+          j.bookmarksCount = j.bookmarksList.length;
+          j.commentsCount = commentsCount;
+          j.sharesCount = j.sharesCount || 0;
+        } catch (e) {
+          // Ignore error and return base job
+        }
+        return j;
+      })
+    );
+
+    if (hasSearchParams) {
+      bodyContent.data = enrichedItems;
+    } else {
+      bodyContent = enrichedItems;
     }
 
     return {
@@ -236,16 +284,19 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       event.queryStringParameters?.userId;
 
     const result = await docClient.send(
-      new GetCommand({
+      new QueryCommand({
         TableName: tableName,
-        Key: {
-          PK: `VACANCY#${id}`,
-          SK: "METADATA",
+        KeyConditionExpression: "PK = :pk",
+        ExpressionAttributeValues: {
+          ":pk": `VACANCY#${id}`,
         },
       }),
     );
 
-    if (!result.Item) {
+    const items = result.Items || [];
+    const metadataItem = items.find((i) => i.SK === "METADATA");
+
+    if (!metadataItem) {
       return {
         statusCode: 404,
         headers: {
@@ -257,7 +308,31 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const item = result.Item;
+    const item = metadataItem;
+    const likesList: string[] = [];
+    const bookmarksList: string[] = [];
+    const comments: any[] = [];
+
+    for (const i of items) {
+      if (i.SK.startsWith("LIKE#")) {
+        likesList.push(i.SK.replace("LIKE#", ""));
+      } else if (i.SK.startsWith("BOOKMARK#")) {
+        bookmarksList.push(i.SK.replace("BOOKMARK#", ""));
+      } else if (i.SK.startsWith("COMMENT#")) {
+        comments.push({
+          id: i.SK,
+          parentId: i.parentId || null,
+          user: i.author || "Usuario",
+          text: i.content || "",
+          createdAt: i.createdAt || i.SK.replace("COMMENT#", ""),
+          isDeleted: i.isDeleted || false,
+        });
+      }
+    }
+
+    item.likesList = likesList;
+    item.bookmarksList = bookmarksList;
+    item.comments = comments;
     const rawJob = {
       id: item.PK.replace("VACANCY#", ""),
       title: item.titulo || item.title,
@@ -281,6 +356,10 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       maxPostulantes: item.maxPostulantes ? Number(item.maxPostulantes) : null,
       estado: item.estado || "Activa",
       createdAt: item.fechaCreacion || item.createdAt,
+      sharesCount: item.sharesCount || 0,
+      likesList: item.likesList,
+      bookmarksList: item.bookmarksList,
+      comments: item.comments,
     };
 
     let appliedJobsMap:
@@ -539,7 +618,7 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
     });
     const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
     const region = process.env.AWS_REGION || "us-east-1";
-    const publicUrl = `http://${bucketName}.s3-website-${region}.amazonaws.com/${key}`;
+    const publicUrl = `https://${bucketName}.s3.${region}.amazonaws.com/${key}`;
     return {
       statusCode: 200,
       headers: {
@@ -817,6 +896,364 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
         "Access-Control-Allow-Credentials": true,
         "Content-Type": "application/json",
       },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const { userUuid } = body;
+
+    if (!userUuid) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el identificador 'userUuid' en el cuerpo" }),
+      };
+    }
+
+    const key = {
+      PK: `VACANCY#${id}`,
+      SK: `LIKE#${userUuid}`,
+    };
+
+    const existing = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: key,
+      }),
+    );
+
+    let liked = false;
+    if (existing.Item) {
+      await docClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: key,
+        }),
+      );
+      liked = false;
+    } else {
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            ...key,
+            fechaInteraccion: new Date().toISOString(),
+          },
+        }),
+      );
+      liked = true;
+    }
+
+    return {
+      statusCode: 200,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ liked, id, userUuid }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const addCommentJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const { author, content, parentId } = body;
+
+    if (!content) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el contenido del comentario" }),
+      };
+    }
+
+    const createdAt = new Date().toISOString();
+    const sk = `COMMENT#${createdAt}`;
+
+    const commentItem = {
+      PK: `VACANCY#${id}`,
+      SK: sk,
+      author: author || "Usuario Anónimo",
+      content,
+      parentId: parentId || null,
+      createdAt,
+    };
+
+    const cleanItem = Object.fromEntries(
+      Object.entries(commentItem).filter(([, v]) => v !== null),
+    );
+
+    await docClient.send(
+      new PutCommand({
+        TableName: tableName,
+        Item: cleanItem,
+      }),
+    );
+
+    return {
+      statusCode: 201,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: sk,
+        parentId: parentId || null,
+        user: author || "Usuario Anónimo",
+        text: content,
+        createdAt,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    const commentId = event.pathParameters?.commentId;
+
+    if (!id || !commentId) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Faltan parámetros 'id' o 'commentId'" }),
+      };
+    }
+
+    const jobItems = await docClient.send(
+      new QueryCommand({
+        TableName: tableName,
+        KeyConditionExpression: "PK = :pk",
+        ExpressionAttributeValues: {
+          ":pk": `VACANCY#${id}`,
+        },
+      }),
+    );
+
+    const items = jobItems.Items || [];
+    const targetComment = items.find((item: any) => item.SK === commentId);
+
+    if (!targetComment) {
+      return {
+        statusCode: 404,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Comentario no encontrado" }),
+      };
+    }
+
+    const isLevel2 = !!targetComment.parentId;
+
+    if (isLevel2) {
+      await docClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            PK: `VACANCY#${id}`,
+            SK: commentId,
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ success: true, id, commentId, action: "DELETED_REPLY" }),
+      };
+    }
+
+    const hasChildren = items.some(
+      (item: any) =>
+        item.SK.startsWith("COMMENT#") &&
+        item.parentId === commentId &&
+        !item.isDeleted,
+    );
+
+    if (hasChildren) {
+      await docClient.send(
+        new UpdateCommand({
+          TableName: tableName,
+          Key: {
+            PK: `VACANCY#${id}`,
+            SK: commentId,
+          },
+          UpdateExpression:
+            "SET content = :deletedText, author = :deletedAuthor, isDeleted = :isDeleted",
+          ExpressionAttributeValues: {
+            ":deletedText": "Comentario no disponible",
+            ":deletedAuthor": "Eliminado",
+            ":isDeleted": true,
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ success: true, id, commentId, action: "SOFT_DELETED_PARENT", isDeleted: true }),
+      };
+    } else {
+      await docClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: {
+            PK: `VACANCY#${id}`,
+            SK: commentId,
+          },
+        }),
+      );
+
+      return {
+        statusCode: 200,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ success: true, id, commentId, action: "DELETED_PARENT" }),
+      };
+    }
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const { userUuid } = body;
+
+    if (!userUuid) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el identificador 'userUuid' en el cuerpo" }),
+      };
+    }
+
+    const key = {
+      PK: `VACANCY#${id}`,
+      SK: `BOOKMARK#${userUuid}`,
+    };
+
+    const existing = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: key,
+      }),
+    );
+
+    let bookmarked = false;
+
+    if (existing.Item) {
+      await docClient.send(
+        new DeleteCommand({
+          TableName: tableName,
+          Key: key,
+        }),
+      );
+      bookmarked = false;
+    } else {
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            ...key,
+            GSI1PK: `BOOKMARK#${userUuid}`,
+            GSI1SK: `VACANCY#${id}`,
+            fechaInteraccion: new Date().toISOString(),
+          },
+        }),
+      );
+      bookmarked = true;
+    }
+
+    return {
+      statusCode: 200,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ bookmarked, id, userUuid }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const shareJob: APIGatewayProxyHandler = async (event) => {
+  try {
+    const id = event.pathParameters?.id;
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+      };
+    }
+
+    const result = await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: {
+          PK: `VACANCY#${id}`,
+          SK: "METADATA",
+        },
+        UpdateExpression: "ADD sharesCount :inc",
+        ExpressionAttributeValues: {
+          ":inc": 1,
+        },
+        ReturnValues: "UPDATED_NEW",
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      body: JSON.stringify({ success: true, id, sharesCount: result.Attributes?.sharesCount || 1 }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
       body: JSON.stringify({ error: (error as Error).message }),
     };
   }
