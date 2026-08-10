@@ -39,10 +39,10 @@ const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 const VALID_STATUSES = [
   "PENDIENTE",
-  "REVISADO",
-  "ENTREVISTA",
-  "ACEPTADO",
+  "EN_CONTACTO",
+  "SELECCIONADO",
   "RECHAZADO",
+  "CONTRATADO",
 ];
 
 const headers = {
@@ -353,13 +353,17 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
       };
     }
 
-    if (existing.Item.status === "ACEPTADO" && status === "RECHAZADO") {
+    if (
+      (existing.Item.status === "SELECCIONADO" ||
+        existing.Item.status === "CONTRATADO") &&
+      status === "RECHAZADO"
+    ) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({
           error:
-            "No se puede descartar a un candidato que ya ha sido aceptado.",
+            "No se puede descartar a un candidato que ya ha sido seleccionado o contratado.",
         }),
       };
     }
@@ -460,12 +464,12 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
           )
           .catch((err) => console.error("Error sending rejection email:", err));
       }
-    } else if (status === "ENTREVISTA") {
+    } else if (status === "EN_CONTACTO") {
       const detailsStr =
         detallesEntrevista ||
-        "El equipo de reclutamiento se pondrá en contacto pronto para definir hora y canal.";
-      notifTitle = `Invitación a Entrevista: ${jobTitle}`;
-      notifMessage = `¡Felicidades! Tu postulación para "${jobTitle}" ha avanzado a entrevistas. Detalles: ${detailsStr}`;
+        "El equipo de reclutamiento se pondrá en contacto pronto.";
+      notifTitle = `Avance en Proceso de Selección: ${jobTitle}`;
+      notifMessage = `Tu postulación para "${jobTitle}" avanza a la etapa de contacto. Detalles: ${detailsStr}`;
 
       if (candidateEmail) {
         await sesClient
@@ -477,17 +481,17 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
                 Subject: { Data: notifTitle },
                 Body: {
                   Text: {
-                    Data: `¡Felicidades!\n\nTu postulación para la vacante "${jobTitle}" en "${companyName}" ha avanzado a la fase de entrevistas.\n\nDetalles de la entrevista:\n${detailsStr}\n\nPor favor mantente al pendiente para más indicaciones.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
+                    Data: `Hola,\n\nTe informamos que tu postulación para la vacante "${jobTitle}" en "${companyName}" ha avanzado a la etapa de contacto.\n\nMensaje del equipo de reclutamiento:\n${detailsStr}\n\nYa puedes comunicarte de manera directa con nosotros a través del chat integrado en tu perfil.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
                   },
                 },
               },
             }),
           )
-          .catch((err) => console.error("Error sending interview email:", err));
+          .catch((err) => console.error("Error sending contact email:", err));
       }
-    } else if (status === "ACEPTADO") {
-      notifTitle = `¡Fuiste aceptado! Vacante: ${jobTitle}`;
-      notifMessage = `¡Felicidades! Has sido aceptado para la vacante "${jobTitle}" en "${companyName}". El equipo se pondrá en contacto contigo pronto.`;
+    } else if (status === "SELECCIONADO") {
+      notifTitle = `¡Fuiste seleccionado! Vacante: ${jobTitle}`;
+      notifMessage = `¡Felicidades! Has sido seleccionado para la vacante "${jobTitle}" en "${companyName}".`;
 
       if (candidateEmail) {
         await sesClient
@@ -499,15 +503,35 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
                 Subject: { Data: notifTitle },
                 Body: {
                   Text: {
-                    Data: `¡Felicidades!\n\nNos complace informarte que has sido seleccionado para la vacante "${jobTitle}" en "${companyName}".\n\nEl equipo de reclutamiento se pondrá en contacto contigo en breve para los siguientes pasos.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
+                    Data: `¡Felicidades!\n\nNos complace informarte que has sido seleccionado para la vacante "${jobTitle}" en "${companyName}".\n\nEl equipo de reclutamiento se pondrá en contacto contigo en breve para los pasos finales.\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
                   },
                 },
               },
             }),
           )
-          .catch((err) =>
-            console.error("Error sending acceptance email:", err),
-          );
+          .catch((err) => console.error("Error sending selection email:", err));
+      }
+    } else if (status === "CONTRATADO") {
+      notifTitle = `¡Felicidades! Fuiste contratado para: ${jobTitle}`;
+      notifMessage = `¡Enhorabuena! Oficialmente has sido contratado para la vacante "${jobTitle}" en "${companyName}".`;
+
+      if (candidateEmail) {
+        await sesClient
+          .send(
+            new SendEmailCommand({
+              Source: "noreply@franciscojgh.com",
+              Destination: { ToAddresses: [candidateEmail] },
+              Message: {
+                Subject: { Data: notifTitle },
+                Body: {
+                  Text: {
+                    Data: `¡Enhorabuena!\n\nEs oficial, has sido contratado para la vacante "${jobTitle}" en "${companyName}".\n\n¡Te damos la bienvenida al equipo!\n\nAtentamente,\nEquipo de Reclutamiento de ${companyName}`,
+                  },
+                },
+              },
+            }),
+          )
+          .catch((err) => console.error("Error sending hired email:", err));
       }
     }
 

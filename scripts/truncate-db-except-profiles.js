@@ -1,5 +1,9 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, ScanCommand, DeleteCommand } = require("@aws-sdk/lib-dynamodb");
+const {
+  DynamoDBDocumentClient,
+  ScanCommand,
+  DeleteCommand,
+} = require("@aws-sdk/lib-dynamodb");
 
 const REGION = "us-east-1";
 const TABLE_NAME = "jobnet-jobs-prod"; // Ajusta esto si tu tabla se llama distinto
@@ -11,17 +15,21 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient);
 
 async function truncateTable() {
   console.log(`Starting database truncate on table: ${TABLE_NAME}...`);
-  console.log("Rule: Deleting everything EXCEPT (PK begins with 'USER#' AND SK == 'PROFILE')");
+  console.log(
+    "Rule: Deleting everything EXCEPT (PK begins with 'USER#' AND SK == 'PROFILE')",
+  );
 
   let lastEvaluatedKey = undefined;
   let itemsDeleted = 0;
   let itemsKept = 0;
 
   do {
-    const scanResult = await docClient.send(new ScanCommand({
-      TableName: TABLE_NAME,
-      ExclusiveStartKey: lastEvaluatedKey,
-    }));
+    const scanResult = await docClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+        ExclusiveStartKey: lastEvaluatedKey,
+      }),
+    );
 
     if (scanResult.Items) {
       for (const item of scanResult.Items) {
@@ -36,13 +44,15 @@ async function truncateTable() {
           console.log(`Keeping User Profile: ${pk}`);
         } else {
           // Eliminar el registro
-          await docClient.send(new DeleteCommand({
-            TableName: TABLE_NAME,
-            Key: {
-              PK: pk,
-              SK: sk,
-            },
-          }));
+          await docClient.send(
+            new DeleteCommand({
+              TableName: TABLE_NAME,
+              Key: {
+                PK: pk,
+                SK: sk,
+              },
+            }),
+          );
           itemsDeleted++;
           console.log(`Deleted record -> PK: ${pk} | SK: ${sk}`);
         }

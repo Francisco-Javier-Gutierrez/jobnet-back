@@ -41,6 +41,9 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   ScanCommand: class {
     constructor(public params: any) {}
   },
+  QueryCommand: class {
+    constructor(public params: any) {}
+  },
   GetCommand: class {
     constructor(public params: any) {}
   },
@@ -263,6 +266,13 @@ describe("moderator handler", () => {
         id: "inc-1",
         jobId: "job-1",
         jobTitle: "Dev Vacancy",
+        postId: "",
+        postTitle: "",
+        companyId: "",
+        companyName: "",
+        targetId: "job-1",
+        targetTitle: "Dev Vacancy",
+        targetType: "VACANTE",
         reporter: "candidato@test.com",
         reason: "Fake job description",
         severity: "alta",
@@ -388,7 +398,9 @@ describe("moderator handler", () => {
     });
 
     it("should return 404 if incident is not found", async () => {
-      mockDynamoSend.mockResolvedValueOnce({ Item: null }); // GetCommand empty
+      mockDynamoSend.mockImplementation(async () => {
+        return { Item: null };
+      });
 
       const event = {
         pathParameters: { incidentId: "inc-1" },
@@ -401,14 +413,32 @@ describe("moderator handler", () => {
     });
 
     it("should approve incident successfully", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "INCIDENT#inc-1",
-          SK: "METADATA",
-          jobId: "job-1",
-        },
-      }); // GetCommand success
-      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand success for incident status
+      mockDynamoSend.mockImplementation(async (command: any) => {
+        const input = command.input || command.params;
+        const pk = input.Key?.PK;
+        if (pk === "INCIDENT#inc-1")
+          return {
+            Item: {
+              PK: "INCIDENT#inc-1",
+              SK: "METADATA",
+              jobId: "job-1",
+              companyId: "comp-1",
+              estatus: "EVALUACION",
+            },
+          };
+        if (
+          input.KeyConditionExpression?.includes(":pk") &&
+          input.ExpressionAttributeValues?.[":pk"]?.startsWith("APPEAL_CHAT")
+        )
+          return {
+            Items: [
+              { senderId: "comp-1" },
+              { senderId: "comp-1" },
+              { senderId: "comp-1" },
+            ],
+          };
+        return {};
+      });
 
       const event = {
         pathParameters: { incidentId: "inc-1" },
@@ -425,15 +455,49 @@ describe("moderator handler", () => {
     });
 
     it("should block incident and vacancy successfully", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "INCIDENT#inc-1",
-          SK: "METADATA",
-          jobId: "job-1",
-        },
-      }); // GetCommand success
-      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand success for incident status
-      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand success for vacancy status
+      mockDynamoSend.mockImplementation(async (command: any) => {
+        const input = command.input || command.params;
+        const pk = input.Key?.PK;
+        if (pk === "INCIDENT#inc-1")
+          return {
+            Item: {
+              PK: "INCIDENT#inc-1",
+              SK: "METADATA",
+              jobId: "job-1",
+              companyId: "comp-1",
+              estatus: "EVALUACION",
+            },
+          };
+        if (pk === "VACANCY#job-1")
+          return {
+            Item: {
+              PK: "VACANCY#job-1",
+              SK: "METADATA",
+              titulo: "Dev Job",
+              empresaUuid: "comp-1",
+            },
+          };
+        if (pk === "USER#comp-1")
+          return {
+            Item: {
+              PK: "USER#comp-1",
+              SK: "PROFILE",
+              email: "company@test.com",
+            },
+          };
+        if (
+          input.KeyConditionExpression?.includes(":pk") &&
+          input.ExpressionAttributeValues?.[":pk"]?.startsWith("APPEAL_CHAT")
+        )
+          return {
+            Items: [
+              { senderId: "comp-1" },
+              { senderId: "comp-1" },
+              { senderId: "comp-1" },
+            ],
+          };
+        return {};
+      });
 
       const event = {
         pathParameters: { incidentId: "inc-1" },
@@ -449,27 +513,46 @@ describe("moderator handler", () => {
       expect(res.estatus).toBe("BLOQUEADO");
     });
     it("should evaluate incident and pause vacancy successfully", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "INCIDENT#inc-1",
-          SK: "METADATA",
-          jobId: "job-1",
-          reason: "Sospechosa",
-        },
-      }); // GetCommand incident success
-      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand incident success
-      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand vacancy success
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "VACANCY#job-1",
-          SK: "METADATA",
-          titulo: "Dev Job",
-          empresaUuid: "comp-1",
-        },
-      }); // GetCommand vacancy success
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: { PK: "USER#comp-1", SK: "PROFILE", email: "company@test.com" },
-      }); // GetCommand company profile success
+      mockDynamoSend.mockImplementation(async (command: any) => {
+        const input = command.input || command.params;
+        const pk = input.Key?.PK;
+        if (pk === "INCIDENT#inc-1")
+          return {
+            Item: {
+              PK: "INCIDENT#inc-1",
+              SK: "METADATA",
+              jobId: "job-1",
+              reason: "Sospechosa",
+              companyId: "comp-1",
+            },
+          };
+        if (pk === "VACANCY#job-1")
+          return {
+            Item: {
+              PK: "VACANCY#job-1",
+              SK: "METADATA",
+              titulo: "Dev Job",
+              empresaUuid: "comp-1",
+            },
+          };
+        if (pk === "USER#comp-1")
+          return {
+            Item: {
+              PK: "USER#comp-1",
+              SK: "PROFILE",
+              email: "company@test.com",
+            },
+          };
+        if (input.ExpressionAttributeValues?.[":pk"] === "APPEAL_CHAT")
+          return {
+            Items: [
+              { senderId: "comp-1" },
+              { senderId: "comp-1" },
+              { senderId: "comp-1" },
+            ],
+          };
+        return {};
+      });
 
       const event = {
         pathParameters: { incidentId: "inc-1" },
@@ -499,15 +582,21 @@ describe("moderator handler", () => {
 
   describe("getSuggestedSkills", () => {
     it("should return suggested skills on success", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          {
-            PK: "SUGGESTION#SKILL#skill-1",
-            SK: "METADATA",
-            name: "Vue 4",
-            fechaCreacion: "2026-07-16T12:00:00.000Z",
-          },
-        ],
+      mockDynamoSend.mockImplementation(async (command: any) => {
+        const input = command.input || command.params;
+        if (input.FilterExpression?.includes("skillPrefix")) {
+          return {
+            Items: [
+              {
+                PK: "SUGGESTION#SKILL#skill-1",
+                SK: "METADATA",
+                name: "Vue 4",
+                fechaCreacion: "2026-07-16T12:00:00.000Z",
+              },
+            ],
+          };
+        }
+        return { Items: [] };
       });
 
       const response = await getSuggestedSkills({} as any, {} as any, () => {});
@@ -518,7 +607,10 @@ describe("moderator handler", () => {
       expect(res[0]).toEqual({
         id: "skill-1",
         name: "Vue 4",
+        category: "Habilidad",
         createdAt: "2026-07-16T12:00:00.000Z",
+        hasDuplicate: false,
+        existingName: null,
       });
     });
 
@@ -599,7 +691,9 @@ describe("moderator handler", () => {
     });
 
     it("should return 404 if suggestion is not found", async () => {
-      mockDynamoSend.mockResolvedValueOnce({ Item: null }); // GetCommand empty
+      mockDynamoSend.mockImplementation(async () => {
+        return { Item: null };
+      });
 
       const event = {
         pathParameters: { id: "skill-1" },
@@ -608,64 +702,23 @@ describe("moderator handler", () => {
 
       const response = await resolveSkillSuggestion(event, {} as any, () => {});
       expect(response.statusCode).toBe(404);
-      expect(JSON.parse(response.body).error).toBe(
-        "Skill suggestion not found",
-      );
-    });
-
-    it("should detect duplicate / similar skill in catalog", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "SUGGESTION#SKILL#skill-1",
-          SK: "METADATA",
-          name: "ReactJS",
-        },
-      }); // GetCommand success
-      mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          {
-            PK: "CATALOG#1",
-            SK: "CATALOG",
-            name: "React",
-            category: "Habilidad",
-          },
-        ],
-      }); // ScanCommand catalog success (ReactJS vs React levenshtein is 2, so it matches similarity)
-
-      const event = {
-        pathParameters: { id: "skill-1" },
-        body: JSON.stringify({ approve: true }),
-      } as any;
-
-      const response = await resolveSkillSuggestion(event, {} as any, () => {});
-      expect(response.statusCode).toBe(200);
-
-      const res = JSON.parse(response.body);
-      expect(res.duplicate).toBe(true);
-      expect(res.existingName).toBe("React");
+      expect(JSON.parse(response.body).error).toBe("Suggestion not found");
     });
 
     it("should approve skill without duplicate or with unifyWith successfully", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "SUGGESTION#SKILL#skill-1",
-          SK: "METADATA",
-          name: "Nuxt 4",
-        },
-      }); // GetCommand success
-      mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          {
-            PK: "CATALOG#1",
-            SK: "CATALOG",
-            name: "React",
-            category: "Habilidad",
-          },
-        ],
-      }); // ScanCommand catalog success
-      mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // exactCheck scan empty
-      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand catalog success
-      mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand success
+      mockDynamoSend.mockImplementation(async (command: any) => {
+        const input = command.input || command.params;
+        const pk = input.Key?.PK;
+        if (pk === "SUGGESTION#SKILL#skill-1")
+          return {
+            Item: {
+              PK: "SUGGESTION#SKILL#skill-1",
+              SK: "METADATA",
+              name: "Nuxt 4",
+            },
+          };
+        return { Items: [] }; // for scans
+      });
 
       const event = {
         pathParameters: { id: "skill-1" },
@@ -681,14 +734,19 @@ describe("moderator handler", () => {
     });
 
     it("should reject suggested skill successfully", async () => {
-      mockDynamoSend.mockResolvedValueOnce({
-        Item: {
-          PK: "SUGGESTION#SKILL#skill-1",
-          SK: "METADATA",
-          name: "Nuxt 4",
-        },
-      }); // GetCommand success
-      mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand success
+      mockDynamoSend.mockImplementation(async (command: any) => {
+        const input = command.input || command.params;
+        const pk = input.Key?.PK;
+        if (pk === "SUGGESTION#SKILL#skill-1")
+          return {
+            Item: {
+              PK: "SUGGESTION#SKILL#skill-1",
+              SK: "METADATA",
+              name: "Nuxt 4",
+            },
+          };
+        return {};
+      });
 
       const event = {
         pathParameters: { id: "skill-1" },

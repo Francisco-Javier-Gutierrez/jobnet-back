@@ -271,6 +271,21 @@ export const resolveVerification: APIGatewayProxyHandler = async (event) => {
       };
     }
 
+    if (
+      approve &&
+      existing.Item.estadoCuenta &&
+      existing.Item.estadoCuenta !== "ACTIVO" &&
+      existing.Item.estadoCuenta !== "Activa"
+    ) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "Solo se puede verificar organizaciones con estatus Activa",
+        }),
+      };
+    }
+
     const updatedItem = {
       ...existing.Item,
       organizacionVerificada: approve,
@@ -681,7 +696,10 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
         await docClient.send(
           new DeleteCommand({
             TableName: tableName,
-            Key: { PK: `VACANCY_SUSPENSION#${incident.jobId}`, SK: "GRACE_PERIOD" },
+            Key: {
+              PK: `VACANCY_SUSPENSION#${incident.jobId}`,
+              SK: "GRACE_PERIOD",
+            },
           }),
         );
 
@@ -768,7 +786,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
                       },
                       Body: {
                         Text: {
-                          Data: `Estimado reclutador,\n\nTras la evaluación de la apelación de su vacante "${incident.jobTitle || 'Sancionada'}", la resolución ha sido en su contra y la vacante ha sido eliminada definitivamente del Job Board por infracción de nuestras normas.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
+                          Data: `Estimado reclutador,\n\nTras la evaluación de la apelación de su vacante "${incident.jobTitle || "Sancionada"}", la resolución ha sido en su contra y la vacante ha sido eliminada definitivamente del Job Board por infracción de nuestras normas.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
                         },
                       },
                     },
@@ -923,7 +941,10 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
         await docClient.send(
           new DeleteCommand({
             TableName: tableName,
-            Key: { PK: `VACANCY_SUSPENSION#${incident.jobId}`, SK: "GRACE_PERIOD" },
+            Key: {
+              PK: `VACANCY_SUSPENSION#${incident.jobId}`,
+              SK: "GRACE_PERIOD",
+            },
           }),
         );
 
@@ -992,7 +1013,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
                       },
                       Body: {
                         Text: {
-                          Data: `Estimado reclutador,\n\nNos complace informarle que la evaluación de su apelación referente a la vacante "${incident.jobTitle || 'Pausada'}" ha concluido de manera favorable.\n\nSu vacante ha sido reactivada y ya se encuentra visible nuevamente en el Job Board.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
+                          Data: `Estimado reclutador,\n\nNos complace informarle que la evaluación de su apelación referente a la vacante "${incident.jobTitle || "Pausada"}" ha concluido de manera favorable.\n\nSu vacante ha sido reactivada y ya se encuentra visible nuevamente en el Job Board.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
                         },
                       },
                     },
@@ -2165,7 +2186,10 @@ export const handleSuspensionExpiry = async (event: any) => {
             executorId: "SISTEMA_DYNAMODB_TTL",
           });
         }
-      } else if (pk.startsWith("VACANCY_SUSPENSION#") && sk === "GRACE_PERIOD") {
+      } else if (
+        pk.startsWith("VACANCY_SUSPENSION#") &&
+        sk === "GRACE_PERIOD"
+      ) {
         const jobId = oldImage.jobId?.S;
         const status = oldImage.status?.S;
 
@@ -2209,7 +2233,8 @@ export const handleSuspensionExpiry = async (event: any) => {
                   SK: `NOTIFICATION#${timestamp}#${notifId}`,
                   id: notifId,
                   type: "SUSPENSION_CONFIRMED",
-                  title: "Resolución Desfavorable: Vacante Eliminada por Expiración",
+                  title:
+                    "Resolución Desfavorable: Vacante Eliminada por Expiración",
                   message: `El periodo de apelación para su vacante ha expirado sin resolución favorable. La vacante ha sido eliminada definitivamente del Job Board por infracción de normas.`,
                   createdAt: timestamp,
                   read: false,
@@ -2354,6 +2379,86 @@ export const getAppeals: APIGatewayProxyHandler = async () => {
       statusCode: 500,
       headers,
       body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+export const toggleUserBlock: APIGatewayProxyHandler = async (event) => {
+  try {
+    const userId = event.pathParameters?.id;
+    if (!userId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "Missing userId" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const { blocked, reason } = body;
+    const timestamp = new Date().toISOString();
+
+    const existing = await docClient.send(
+      new GetCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${userId}`, SK: "PROFILE" },
+      }),
+    );
+
+    if (!existing.Item) {
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ error: "User not found" }),
+      };
+    }
+
+    const tipoUsuario = existing.Item.tipoUsuario || "CANDIDATO";
+
+    const updateExp =
+      "SET bloqueada = :b, estatus = :st, estadoCuenta = :ec, updatedAt = :u" +
+      (blocked ? ", suspensionReason = :sr" : " REMOVE suspensionReason");
+
+    const attrs: any = {
+      ":b": blocked,
+      ":st": blocked ? "Suspendida" : "Activa",
+      ":ec": blocked ? "SUSPENDIDA" : "ACTIVO",
+      ":u": timestamp,
+    };
+
+    if (blocked) {
+      attrs[":sr"] = reason || "Bloqueo manual por moderador";
+    }
+
+    await docClient.send(
+      new UpdateCommand({
+        TableName: tableName,
+        Key: { PK: `USER#${userId}`, SK: "PROFILE" },
+        UpdateExpression: updateExp,
+        ExpressionAttributeValues: attrs,
+      }),
+    );
+
+    await saveAuditLog({
+      targetId: userId,
+      targetType: tipoUsuario,
+      action: blocked ? "BLOQUEO_MANUAL" : "DESBLOQUEO_MANUAL",
+      reason:
+        reason ||
+        (blocked ? "Bloqueo por moderador" : "Desbloqueo por moderador"),
+      executorId: "MODERADOR",
+    });
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ success: true, userId, blocked }),
+    };
+  } catch (e: any) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: e.message }),
     };
   }
 };

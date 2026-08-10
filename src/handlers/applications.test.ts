@@ -97,7 +97,7 @@ describe("applications handler", () => {
       expect(body.status).toBe("PENDIENTE");
       expect(body.coverLetter).toBe("I am interested");
       expect(body.appliedAt).toBeDefined();
-      expect(mockDynamoSend).toHaveBeenCalledTimes(3);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(4);
     });
 
     it("should return 201 with null coverLetter when not provided", async () => {
@@ -386,7 +386,7 @@ describe("applications handler", () => {
 
       const event = {
         pathParameters: { jobId: "job-1", candidateId: "user-1" },
-        body: JSON.stringify({ status: "REVISADO" }),
+        body: JSON.stringify({ status: "SELECCIONADO" }),
       } as any;
 
       const response = await updateApplicationStatus(
@@ -423,7 +423,7 @@ describe("applications handler", () => {
       const event = {
         pathParameters: { jobId: "job-1", candidateId: "user-1" },
         body: JSON.stringify({
-          status: "ENTREVISTA",
+          status: "EN_CONTACTO",
           detallesEntrevista: "Lunes 10am",
         }),
       } as any;
@@ -437,47 +437,50 @@ describe("applications handler", () => {
       const body = JSON.parse(response.body);
       expect(body.jobId).toBe("job-1");
       expect(body.candidateId).toBe("user-1");
-      expect(body.status).toBe("ENTREVISTA");
+      expect(body.status).toBe("EN_CONTACTO");
       expect(body.updatedAt).toBeDefined();
-      expect(mockDynamoSend).toHaveBeenCalledTimes(5);
+      expect(mockDynamoSend).toHaveBeenCalledTimes(6);
     });
 
-    it.each(["PENDIENTE", "REVISADO", "ENTREVISTA", "ACEPTADO", "RECHAZADO"])(
-      "should accept valid status '%s'",
-      async (status) => {
-        mockDynamoSend.mockResolvedValueOnce({
-          Item: { PK: "JOB#job-1", SK: "APP#user-1" },
-        });
-        mockDynamoSend.mockResolvedValueOnce({});
-        mockDynamoSend.mockResolvedValueOnce({});
-        mockDynamoSend.mockResolvedValueOnce({
-          Item: { email: "candidate@example.com" },
-        });
-        mockDynamoSend.mockResolvedValueOnce({
-          Item: { titulo: "SDE", company: "Company" },
-        });
+    it.each([
+      "PENDIENTE",
+      "EN_CONTACTO",
+      "SELECCIONADO",
+      "CONTRATADO",
+      "RECHAZADO",
+    ])("should accept valid status '%s'", async (status) => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { PK: "JOB#job-1", SK: "APP#user-1" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({});
+      mockDynamoSend.mockResolvedValueOnce({});
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { email: "candidate@example.com" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { titulo: "SDE", company: "Company" },
+      });
 
-        const event = {
-          pathParameters: { jobId: "job-1", candidateId: "user-1" },
-          body: JSON.stringify({ status }),
-        } as any;
+      const event = {
+        pathParameters: { jobId: "job-1", candidateId: "user-1" },
+        body: JSON.stringify({ status }),
+      } as any;
 
-        const response = await updateApplicationStatus(
-          event,
-          {} as any,
-          () => {},
-        );
-        expect(response.statusCode).toBe(200);
-        expect(JSON.parse(response.body).status).toBe(status);
-      },
-    );
+      const response = await updateApplicationStatus(
+        event,
+        {} as any,
+        () => {},
+      );
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body).status).toBe(status);
+    });
 
     it("should return 500 on DynamoDB error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("DB error"));
 
       const event = {
         pathParameters: { jobId: "job-1", candidateId: "user-1" },
-        body: JSON.stringify({ status: "REVISADO" }),
+        body: JSON.stringify({ status: "SELECCIONADO" }),
       } as any;
 
       const response = await updateApplicationStatus(

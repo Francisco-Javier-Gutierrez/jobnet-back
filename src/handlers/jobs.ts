@@ -160,6 +160,8 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
       })
       .filter((j) => {
         if (j.estado === "CERRADA") return false;
+        if (j.estado === "PAUSADA") return false;
+        if (j.estado === "SUSPENDIDA") return false;
         if (j.estado === "Eliminada") return false;
         if (j.isDeleted) return false;
         if (j.oculta) return false;
@@ -233,7 +235,7 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
           // Ignore error and return base job
         }
         return j;
-      })
+      }),
     );
 
     if (hasSearchParams) {
@@ -907,8 +909,14 @@ export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
     if (!id) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la vacante",
+        }),
       };
     }
 
@@ -918,8 +926,14 @@ export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
     if (!userUuid) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Falta el identificador 'userUuid' en el cuerpo" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Falta el identificador 'userUuid' en el cuerpo",
+        }),
       };
     }
 
@@ -959,13 +973,21 @@ export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ liked, id, userUuid }),
     };
   } catch (error: unknown) {
     return {
       statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ error: (error as Error).message }),
     };
   }
@@ -977,8 +999,14 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
     if (!id) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la vacante",
+        }),
       };
     }
 
@@ -988,7 +1016,11 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
     if (!content) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ error: "Falta el contenido del comentario" }),
       };
     }
@@ -1018,7 +1050,11 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
 
     return {
       statusCode: 201,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({
         id: sk,
         parentId: parentId || null,
@@ -1030,7 +1066,11 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
   } catch (error: unknown) {
     return {
       statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ error: (error as Error).message }),
     };
   }
@@ -1044,7 +1084,11 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
     if (!id || !commentId) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ error: "Faltan parámetros 'id' o 'commentId'" }),
       };
     }
@@ -1065,7 +1109,11 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
     if (!targetComment) {
       return {
         statusCode: 404,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ error: "Comentario no encontrado" }),
       };
     }
@@ -1085,8 +1133,17 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
 
       return {
         statusCode: 200,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ success: true, id, commentId, action: "DELETED_REPLY" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          success: true,
+          id,
+          commentId,
+          action: "DELETED_REPLY",
+        }),
       };
     }
 
@@ -1117,8 +1174,18 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
 
       return {
         statusCode: 200,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ success: true, id, commentId, action: "SOFT_DELETED_PARENT", isDeleted: true }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          success: true,
+          id,
+          commentId,
+          action: "SOFT_DELETED_PARENT",
+          isDeleted: true,
+        }),
       };
     } else {
       await docClient.send(
@@ -1133,14 +1200,27 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
 
       return {
         statusCode: 200,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ success: true, id, commentId, action: "DELETED_PARENT" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          success: true,
+          id,
+          commentId,
+          action: "DELETED_PARENT",
+        }),
       };
     }
   } catch (error: unknown) {
     return {
       statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ error: (error as Error).message }),
     };
   }
@@ -1152,8 +1232,14 @@ export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
     if (!id) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la vacante",
+        }),
       };
     }
 
@@ -1163,8 +1249,14 @@ export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
     if (!userUuid) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Falta el identificador 'userUuid' en el cuerpo" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Falta el identificador 'userUuid' en el cuerpo",
+        }),
       };
     }
 
@@ -1207,13 +1299,21 @@ export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ bookmarked, id, userUuid }),
     };
   } catch (error: unknown) {
     return {
       statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ error: (error as Error).message }),
     };
   }
@@ -1225,8 +1325,14 @@ export const shareJob: APIGatewayProxyHandler = async (event) => {
     if (!id) {
       return {
         statusCode: 400,
-        headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Falta el parámetro 'id' de la vacante" }),
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Falta el parámetro 'id' de la vacante",
+        }),
       };
     }
 
@@ -1247,13 +1353,25 @@ export const shareJob: APIGatewayProxyHandler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
-      body: JSON.stringify({ success: true, id, sharesCount: result.Attributes?.sharesCount || 1 }),
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        success: true,
+        id,
+        sharesCount: result.Attributes?.sharesCount || 1,
+      }),
     };
   } catch (error: unknown) {
     return {
       statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": true, "Content-Type": "application/json" },
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ error: (error as Error).message }),
     };
   }

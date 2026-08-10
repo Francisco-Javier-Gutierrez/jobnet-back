@@ -122,6 +122,7 @@ export const handler: PostConfirmationTriggerHandler = async (
   } else if (tipoUsuario === "ORGANIZACION") {
     Object.assign(userItem, {
       taxId: userAttributes["custom:tax_id"] || "",
+      telefono: userAttributes["phone_number"] || "",
       fotoPerfil: "",
       biografia: "",
       enlacesWeb: {},

@@ -1,6 +1,14 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, ScanCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
-const { S3Client, ListObjectsV2Command, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  DynamoDBDocumentClient,
+  ScanCommand,
+  PutCommand,
+} = require("@aws-sdk/lib-dynamodb");
+const {
+  S3Client,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} = require("@aws-sdk/client-s3");
 
 const REGION = "us-east-1";
 const TABLE_NAME = "jobnet-jobs-prod";
@@ -16,7 +24,9 @@ const WRONG_URL = `http://${BUCKET_NAME}.s3-website-${REGION}.amazonaws.com`;
 const CORRECT_URL = `https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com`;
 
 async function main() {
-  console.log(`Starting cleanup on Table: ${TABLE_NAME} and Bucket: ${BUCKET_NAME}...`);
+  console.log(
+    `Starting cleanup on Table: ${TABLE_NAME} and Bucket: ${BUCKET_NAME}...`,
+  );
 
   let lastEvaluatedKey = undefined;
   const allItems = [];
@@ -24,10 +34,12 @@ async function main() {
 
   // 1. Scan DynamoDB Table
   do {
-    const scanResult = await docClient.send(new ScanCommand({
-      TableName: TABLE_NAME,
-      ExclusiveStartKey: lastEvaluatedKey,
-    }));
+    const scanResult = await docClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+        ExclusiveStartKey: lastEvaluatedKey,
+      }),
+    );
 
     if (scanResult.Items) {
       allItems.push(...scanResult.Items);
@@ -39,7 +51,7 @@ async function main() {
 
   // 2. Fix broken URLs and collect all used active S3 keys
   const activeS3Keys = new Set();
-  
+
   for (const item of allItems) {
     let itemStr = JSON.stringify(item);
     let updated = false;
@@ -52,7 +64,10 @@ async function main() {
 
     // Extract all used S3 keys
     // URLs look like: https://jobnet-uploads-prod.s3.us-east-1.amazonaws.com/uploads/...
-    const regex = new RegExp(`https://${BUCKET_NAME}\\.s3\\.${REGION}\\.amazonaws\\.com/([^"\\\\s]+)`, 'g');
+    const regex = new RegExp(
+      `https://${BUCKET_NAME}\\.s3\\.${REGION}\\.amazonaws\\.com/([^"\\\\s]+)`,
+      "g",
+    );
     let match;
     while ((match = regex.exec(itemStr)) !== null) {
       activeS3Keys.add(match[1]);
@@ -60,17 +75,23 @@ async function main() {
 
     if (updated) {
       const fixedItem = JSON.parse(itemStr);
-      await docClient.send(new PutCommand({
-        TableName: TABLE_NAME,
-        Item: fixedItem,
-      }));
+      await docClient.send(
+        new PutCommand({
+          TableName: TABLE_NAME,
+          Item: fixedItem,
+        }),
+      );
       updatedCount++;
-      console.log(`Fixed URLs in DB Item PK: ${fixedItem.PK} | SK: ${fixedItem.SK}`);
+      console.log(
+        `Fixed URLs in DB Item PK: ${fixedItem.PK} | SK: ${fixedItem.SK}`,
+      );
     }
   }
 
   console.log(`Updated ${updatedCount} DB items.`);
-  console.log(`Found ${activeS3Keys.size} active S3 object keys in the database.`);
+  console.log(
+    `Found ${activeS3Keys.size} active S3 object keys in the database.`,
+  );
 
   // 3. List all objects in S3
   let isTruncated = true;
@@ -79,10 +100,12 @@ async function main() {
   let deletedCount = 0;
 
   while (isTruncated) {
-    const listResponse = await s3Client.send(new ListObjectsV2Command({
-      Bucket: BUCKET_NAME,
-      ContinuationToken: continuationToken,
-    }));
+    const listResponse = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET_NAME,
+        ContinuationToken: continuationToken,
+      }),
+    );
 
     if (listResponse.Contents) {
       for (const s3Obj of listResponse.Contents) {
@@ -92,10 +115,12 @@ async function main() {
         // Skip keys that aren't in the 'uploads/' directory if necessary, but generally we check all
         if (!activeS3Keys.has(key)) {
           console.log(`Deleting orphaned S3 object: ${key}`);
-          await s3Client.send(new DeleteObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: key,
-          }));
+          await s3Client.send(
+            new DeleteObjectCommand({
+              Bucket: BUCKET_NAME,
+              Key: key,
+            }),
+          );
           deletedCount++;
         }
       }

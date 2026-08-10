@@ -259,6 +259,12 @@ functions:
       - httpApi:
           path: /moderator/organizations/{id}/confirm-suspension
           method: post
+  toggleUserBlock:
+    handler: src/handlers/moderator.toggleUserBlock
+    events:
+      - httpApi:
+          path: /moderator/users/{id}/block
+          method: post
   getSuspensionStatus:
     handler: src/handlers/moderator.getSuspensionStatus
     events:
