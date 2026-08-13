@@ -285,7 +285,7 @@ functions:
     handler: src/handlers/wsHandlers.getAppealMessages
     events:
       - httpApi:
-          path: /moderator/organizations/{id}/appeal-messages
+          path: /moderator/appeals/{id}/messages
           method: get
   joinAppeal:
     handler: src/handlers/moderator.joinAppeal
@@ -297,7 +297,7 @@ functions:
     handler: src/handlers/wsHandlers.sendAppealMessageHttp
     events:
       - httpApi:
-          path: /moderator/organizations/{id}/appeal-messages
+          path: /moderator/appeals/{id}/messages
           method: post
   getAppeals:
     handler: src/handlers/moderator.getAppeals

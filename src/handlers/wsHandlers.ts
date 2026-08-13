@@ -225,6 +225,7 @@ export const sendMessage = async (event: any) => {
       jobId,
       candidateId,
       disputeId,
+      appealId,
       appealCompanyId,
       text,
       attachmentUrl,
@@ -234,8 +235,8 @@ export const sendMessage = async (event: any) => {
       messageId: clientMessageId,
     } = body;
 
-    // Handle Appeal Chat Routing if appealCompanyId is present
-    if (appealCompanyId) {
+    // Handle Appeal Chat Routing if appealId is present
+    if (appealId && appealCompanyId) {
       if (!text && !attachmentUrl) {
         return {
           statusCode: 400,
@@ -254,7 +255,7 @@ export const sendMessage = async (event: any) => {
             KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
             FilterExpression: "messageId = :mid",
             ExpressionAttributeValues: {
-              ":pk": `APPEAL_CHAT#${appealCompanyId}`,
+              ":pk": `APPEAL_CHAT#${appealId}`,
               ":skPrefix": "MSG#",
               ":mid": clientMessageId,
             },
@@ -276,9 +277,10 @@ export const sendMessage = async (event: any) => {
       }
 
       const messageItem: any = {
-        PK: `APPEAL_CHAT#${appealCompanyId}`,
+        PK: `APPEAL_CHAT#${appealId}`,
         SK: `MSG#${timestamp}#${messageId}`,
         messageId,
+        appealId,
         companyId: appealCompanyId,
         senderId,
         text: text || "",
@@ -359,6 +361,7 @@ export const sendMessage = async (event: any) => {
                     JSON.stringify({
                       type: "APPEAL_MESSAGE",
                       messageId,
+                      appealId,
                       appealCompanyId,
                       senderId,
                       text: text || "",
@@ -618,9 +621,9 @@ export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
 };
 
 export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
-  const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
+  const appealId = event.pathParameters?.id || event.pathParameters?.appealId;
 
-  if (!companyId) {
+  if (!appealId) {
     return {
       statusCode: 400,
       headers: {
@@ -629,7 +632,7 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        error: "Missing path parameter 'companyId'",
+        error: "Missing path parameter 'id'",
       }),
     };
   }
@@ -640,7 +643,7 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
         TableName: tableName,
         KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
         ExpressionAttributeValues: {
-          ":pk": `APPEAL_CHAT#${companyId}`,
+          ":pk": `APPEAL_CHAT#${appealId}`,
           ":skPrefix": "MSG#",
         },
       }),
@@ -653,6 +656,7 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
           (!m.text || !m.text.includes("La empresa se ha unido")),
       )
       .map((m) => ({
+        appealId: m.appealId || appealId,
         companyId: m.companyId,
         senderId: m.senderId,
         text: m.text,
@@ -901,12 +905,12 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
 export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
   event: any,
 ) => {
-  const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
-  if (!companyId) {
+  const appealId = event.pathParameters?.id || event.pathParameters?.appealId;
+  if (!appealId) {
     return {
       statusCode: 400,
       headers: corsHeaders,
-      body: JSON.stringify({ error: "Missing parameter 'companyId'" }),
+      body: JSON.stringify({ error: "Missing parameter 'id'" }),
     };
   }
 
@@ -915,10 +919,16 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
       typeof event.body === "string"
         ? JSON.parse(event.body)
         : event.body || {};
-    const { text, attachmentUrl } = body;
-    // Accept senderId from body (sent by frontend) with fallback to JWT principalId.
-    // Previously this defaulted to "MODERATOR" which caused org messages to be
-    // incorrectly attributed to the moderator when the org used HTTP fallback.
+    const { text, attachmentUrl, companyId } = body;
+    
+    if (!companyId) {
+      return {
+        statusCode: 400,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: "Missing parameter 'companyId' in body" }),
+      };
+    }
+
     const senderId =
       body.senderId ||
       event.requestContext.authorizer?.principalId ||
@@ -936,7 +946,6 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
     const timestamp = new Date().toISOString();
     const messageId = body.messageId || randomUUID();
 
-    // Idempotency check: skip if this messageId was already persisted
     if (body.messageId) {
       const dupCheck = await docClient.send(
         new QueryCommand({
@@ -944,7 +953,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
           KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
           FilterExpression: "messageId = :mid",
           ExpressionAttributeValues: {
-            ":pk": `APPEAL_CHAT#${companyId}`,
+            ":pk": `APPEAL_CHAT#${appealId}`,
             ":skPrefix": "MSG#",
             ":mid": body.messageId,
           },
@@ -969,9 +978,10 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
     }
 
     const messageItem: any = {
-      PK: `APPEAL_CHAT#${companyId}`,
+      PK: `APPEAL_CHAT#${appealId}`,
       SK: `MSG#${timestamp}#${messageId}`,
       messageId,
+      appealId,
       companyId,
       senderId,
       text: text || "",
@@ -989,8 +999,6 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
       }),
     );
 
-    // Push to WS connections of company and moderators if active.
-    // Also resolve the org owner's actual Cognito sub for proper WS delivery.
     const targetKeys: string[] = [`USER#${companyId}`, "ROLE#MODERATOR"];
 
     try {
@@ -1048,6 +1056,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
                 JSON.stringify({
                   type: "APPEAL_MESSAGE",
                   messageId,
+                  appealId,
                   appealCompanyId: companyId,
                   senderId,
                   text: text || "",
