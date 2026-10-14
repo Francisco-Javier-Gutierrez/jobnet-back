@@ -1,11 +1,6 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import {
-  docClient,
-  tableName,
-  headers,
-  enrichProfileItem,
-} from "./common";
+import { docClient, tableName, headers, enrichProfileItem } from "./common";
 
 export const getProfile: APIGatewayProxyHandler = async (event) => {
   try {

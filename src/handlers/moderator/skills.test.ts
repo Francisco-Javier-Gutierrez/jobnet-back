@@ -218,7 +218,11 @@ describe("moderator skills handlers", () => {
 
     it("should approve skill suggestion with unifyMode REPLACE_EXISTING", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Item: { PK: "SUGGESTION#SKILL#skill-1", name: "ReactJS", category: "Habilidad" },
+        Item: {
+          PK: "SUGGESTION#SKILL#skill-1",
+          name: "ReactJS",
+          category: "Habilidad",
+        },
       }); // Suggestion lookup
       mockDynamoSend.mockResolvedValueOnce({
         Items: [{ PK: "CATALOG#cat-1", name: "React" }],
@@ -242,7 +246,11 @@ describe("moderator skills handlers", () => {
 
     it("should approve skill suggestion with unifyMode KEEP_EXISTING", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Item: { PK: "SUGGESTION#SKILL#skill-1", name: "ReactJS", category: "Habilidad" },
+        Item: {
+          PK: "SUGGESTION#SKILL#skill-1",
+          name: "ReactJS",
+          category: "Habilidad",
+        },
       }); // Suggestion lookup
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand suggestion
 

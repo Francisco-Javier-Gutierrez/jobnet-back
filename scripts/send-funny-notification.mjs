@@ -36,7 +36,10 @@ console.log("Enviando notificación Web Push al endpoint...");
 webpush
   .sendNotification(subscription, payload)
   .then((res) => {
-    console.log("¡NOTIFICACIÓN ENVIADA CON ÉXITO! Código de estado:", res.statusCode);
+    console.log(
+      "¡NOTIFICACIÓN ENVIADA CON ÉXITO! Código de estado:",
+      res.statusCode,
+    );
   })
   .catch((err) => {
     console.error("Error al enviar la notificación:", err);

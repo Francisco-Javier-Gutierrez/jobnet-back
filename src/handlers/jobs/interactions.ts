@@ -138,8 +138,7 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
           Key: { PK: `VACANCY#${id}`, SK: "METADATA" },
         }),
       );
-      const targetCompany =
-        jobRes.Item?.empresaUuid || jobRes.Item?.companyId;
+      const targetCompany = jobRes.Item?.empresaUuid || jobRes.Item?.companyId;
       const jobTitle =
         jobRes.Item?.titulo || jobRes.Item?.title || "tu vacante";
 

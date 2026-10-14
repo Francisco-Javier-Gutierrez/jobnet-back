@@ -71,7 +71,11 @@ describe("profile common", () => {
       // default fallbacks for post with no fotoPerfil or authorAvatar
     };
 
-    const results = await enrichPostsWithRelations([post1, post2], mockClient, "table");
+    const results = await enrichPostsWithRelations(
+      [post1, post2],
+      mockClient,
+      "table",
+    );
     expect(results).toHaveLength(2);
     expect(results[0].uniqueId).toBe("uuid-1");
     expect(results[0].likesList).toContain("user-1");
@@ -85,12 +89,14 @@ describe("profile common", () => {
     // Null Items test & unhandled SK test
     const mockClientNullItems = {
       send: vi.fn().mockResolvedValue({
-        Items: [
-          { SK: "UNKNOWN#123" },
-        ],
+        Items: [{ SK: "UNKNOWN#123" }],
       }),
     };
-    const results2 = await enrichPostsWithRelations([{ PK: "POST#uuid-3" }], mockClientNullItems, "table");
+    const results2 = await enrichPostsWithRelations(
+      [{ PK: "POST#uuid-3" }],
+      mockClientNullItems,
+      "table",
+    );
     expect(results2).toHaveLength(1);
     expect(results2[0].likesList).toHaveLength(0);
 
@@ -98,7 +104,11 @@ describe("profile common", () => {
     const mockClientUndef = {
       send: vi.fn().mockResolvedValue({}),
     };
-    const results3 = await enrichPostsWithRelations([{ PK: "POST#uuid-4" }], mockClientUndef, "table");
+    const results3 = await enrichPostsWithRelations(
+      [{ PK: "POST#uuid-4" }],
+      mockClientUndef,
+      "table",
+    );
     expect(results3).toHaveLength(1);
   });
 });
