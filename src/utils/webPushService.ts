@@ -60,8 +60,14 @@ export async function savePushSubscription(
   subscription: PushSubscriptionData,
   userAgent: string = "unknown",
 ): Promise<void> {
-  if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
-    throw new Error("Invalid push subscription format: endpoint and keys are required.");
+  if (
+    !subscription?.endpoint ||
+    !subscription?.keys?.p256dh ||
+    !subscription?.keys?.auth
+  ) {
+    throw new Error(
+      "Invalid push subscription format: endpoint and keys are required.",
+    );
   }
 
   const endpointHash = hashEndpoint(subscription.endpoint);
@@ -172,7 +178,10 @@ export async function sendPushToUser(
               console.error("Error removing expired subscription:", cleanupErr);
             }
           } else {
-            console.error(`Failed to send web push to ${userId}:`, error.message || error);
+            console.error(
+              `Failed to send web push to ${userId}:`,
+              error.message || error,
+            );
           }
         }
       }),
@@ -231,7 +240,10 @@ export async function createUserNotification({
       }),
     );
   } catch (dbErr) {
-    console.error(`Error saving notification to DynamoDB for ${userId}:`, dbErr);
+    console.error(
+      `Error saving notification to DynamoDB for ${userId}:`,
+      dbErr,
+    );
   }
 
   try {
@@ -275,7 +287,11 @@ export interface PushSubscriberUser {
   lastActive: string;
 }
 
-export function parseUserAgent(ua: string = ""): { browser: string; os: string; deviceLabel: string } {
+export function parseUserAgent(ua: string = ""): {
+  browser: string;
+  os: string;
+  deviceLabel: string;
+} {
   let browser = "Navegador Web";
   let os = "Dispositivo";
 
@@ -361,7 +377,10 @@ export async function getAllPushSubscribers(): Promise<PushSubscriberUser[]> {
         const u = userMap.get(userId)!;
         u.devices.push(device);
         u.deviceCount = u.devices.length;
-        if (new Date(device.updatedAt).getTime() > new Date(u.lastActive).getTime()) {
+        if (
+          new Date(device.updatedAt).getTime() >
+          new Date(u.lastActive).getTime()
+        ) {
           u.lastActive = device.updatedAt;
         }
       }
@@ -391,14 +410,18 @@ export async function getAllPushSubscribers(): Promise<PushSubscriberUser[]> {
             u.fotoPerfil = p.fotoPerfil || p.avatarUrl || "";
           }
         } catch (err) {
-          console.warn(`Error al consultar perfil de usuario ${u.userId}:`, err);
+          console.warn(
+            `Error al consultar perfil de usuario ${u.userId}:`,
+            err,
+          );
         }
       }),
     );
 
     // Ordenar por última actividad descendente
     userList.sort(
-      (a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime(),
+      (a, b) =>
+        new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime(),
     );
 
     return userList;
@@ -407,4 +430,3 @@ export async function getAllPushSubscribers(): Promise<PushSubscriberUser[]> {
     return [];
   }
 }
-

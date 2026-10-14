@@ -47,7 +47,11 @@ describe("applications apply handler", () => {
   });
 
   it("should return 400 if id or candidateId is missing", async () => {
-    const res1 = await applyToJob({ pathParameters: {} } as any, {} as any, () => {});
+    const res1 = await applyToJob(
+      { pathParameters: {} } as any,
+      {} as any,
+      () => {},
+    );
     expect(res1.statusCode).toBe(400);
 
     const res2 = await applyToJob(
@@ -72,7 +76,9 @@ describe("applications apply handler", () => {
       () => {},
     );
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain("cerrada a nuevas postulaciones");
+    expect(JSON.parse(res.body).error).toContain(
+      "cerrada a nuevas postulaciones",
+    );
   });
 
   it("should return 400 if maxPostulantes limit is reached", async () => {
@@ -92,7 +98,9 @@ describe("applications apply handler", () => {
       () => {},
     );
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain("límite máximo de postulantes");
+    expect(JSON.parse(res.body).error).toContain(
+      "límite máximo de postulantes",
+    );
   });
 
   it("should apply to job successfully creating bidirectional records and chat message", async () => {

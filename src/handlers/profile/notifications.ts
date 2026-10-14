@@ -202,7 +202,8 @@ export const savePushSubscription: APIGatewayProxyHandler = async (event) => {
         statusCode: 400,
         headers,
         body: JSON.stringify({
-          error: "Invalid payload: subscription object with endpoint and keys is required",
+          error:
+            "Invalid payload: subscription object with endpoint and keys is required",
         }),
       };
     }
@@ -244,7 +245,9 @@ export const deletePushSubscription: APIGatewayProxyHandler = async (event) => {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing 'endpoint' in request body or query parameter" }),
+        body: JSON.stringify({
+          error: "Missing 'endpoint' in request body or query parameter",
+        }),
       };
     }
 
@@ -400,4 +403,3 @@ export const sendCustomPushNotification: APIGatewayProxyHandler = async (
     };
   }
 };
-

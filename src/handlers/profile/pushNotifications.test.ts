@@ -153,11 +153,7 @@ describe("push notifications", () => {
 
   describe("getVapidPublicKey handler", () => {
     it("returns the public key with status 200", async () => {
-      const res: any = await getVapidPublicKey(
-        {} as any,
-        {} as any,
-        () => {},
-      );
+      const res: any = await getVapidPublicKey({} as any, {} as any, () => {});
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.body);
       expect(data.publicKey).toBeDefined();
@@ -222,7 +218,8 @@ describe("push notifications", () => {
 
   describe("parseUserAgent", () => {
     it("parses Windows and Chrome correctly", () => {
-      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+      const ua =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
       const parsed = parseUserAgent(ua);
       expect(parsed.browser).toBe("Chrome");
       expect(parsed.os).toBe("Windows 10/11");
@@ -230,7 +227,8 @@ describe("push notifications", () => {
     });
 
     it("parses macOS and Safari correctly", () => {
-      const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+      const ua =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
       const parsed = parseUserAgent(ua);
       expect(parsed.browser).toBe("Safari");
       expect(parsed.os).toBe("macOS");
@@ -238,7 +236,8 @@ describe("push notifications", () => {
     });
 
     it("parses Android and Firefox correctly", () => {
-      const ua = "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0";
+      const ua =
+        "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0";
       const parsed = parseUserAgent(ua);
       expect(parsed.browser).toBe("Firefox");
       expect(parsed.os).toBe("Android");
@@ -260,7 +259,8 @@ describe("push notifications", () => {
               PK: "USER#user-1",
               SK: "PUSH_SUB#hash1",
               endpoint: "https://push.example.com/1",
-              userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
+              userAgent:
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
               createdAt: "2026-10-14T10:00:00.000Z",
               updatedAt: "2026-10-14T10:00:00.000Z",
             },
@@ -342,4 +342,3 @@ describe("push notifications", () => {
     });
   });
 });
-

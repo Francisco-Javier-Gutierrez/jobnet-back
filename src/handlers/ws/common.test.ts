@@ -44,7 +44,9 @@ describe("ws common utilities", () => {
         },
       };
       const endpoint = getEndpoint(event);
-      expect(endpoint).toBe("https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev");
+      expect(endpoint).toBe(
+        "https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev",
+      );
     });
 
     it("should resolve fallback endpoint using WS_API_ID and default stage", () => {
