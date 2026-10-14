@@ -29,6 +29,12 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   UpdateCommand: class {
     constructor(public params: any) {}
   },
+  ScanCommand: class {
+    constructor(public params: any) {}
+  },
+  GetCommand: class {
+    constructor(public params: any) {}
+  },
 }));
 
 vi.mock("web-push", () => ({
@@ -42,12 +48,16 @@ import {
   savePushSubscription,
   deletePushSubscription,
   getVapidPublicKey,
+  getPushSubscribers,
+  sendCustomPushNotification,
 } from "./notifications";
 import {
   savePushSubscription as saveSubService,
   removePushSubscription as removeSubService,
   sendPushToUser,
   hashEndpoint,
+  getAllPushSubscribers,
+  parseUserAgent,
 } from "../../utils/webPushService";
 
 describe("push notifications", () => {
@@ -209,4 +219,127 @@ describe("push notifications", () => {
       expect(mockDynamoSend).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe("parseUserAgent", () => {
+    it("parses Windows and Chrome correctly", () => {
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+      const parsed = parseUserAgent(ua);
+      expect(parsed.browser).toBe("Chrome");
+      expect(parsed.os).toBe("Windows 10/11");
+      expect(parsed.deviceLabel).toBe("Chrome en Windows 10/11");
+    });
+
+    it("parses macOS and Safari correctly", () => {
+      const ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
+      const parsed = parseUserAgent(ua);
+      expect(parsed.browser).toBe("Safari");
+      expect(parsed.os).toBe("macOS");
+      expect(parsed.deviceLabel).toBe("Safari en macOS");
+    });
+
+    it("parses Android and Firefox correctly", () => {
+      const ua = "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0";
+      const parsed = parseUserAgent(ua);
+      expect(parsed.browser).toBe("Firefox");
+      expect(parsed.os).toBe("Android");
+    });
+  });
+
+  describe("getAllPushSubscribers", () => {
+    it("returns empty array if no push subscriptions found", async () => {
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+      const subscribers = await getAllPushSubscribers();
+      expect(subscribers).toEqual([]);
+    });
+
+    it("groups devices by user and enriches with profile data", async () => {
+      mockDynamoSend
+        .mockResolvedValueOnce({
+          Items: [
+            {
+              PK: "USER#user-1",
+              SK: "PUSH_SUB#hash1",
+              endpoint: "https://push.example.com/1",
+              userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
+              createdAt: "2026-10-14T10:00:00.000Z",
+              updatedAt: "2026-10-14T10:00:00.000Z",
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          Item: {
+            PK: "USER#user-1",
+            SK: "PROFILE",
+            nombre: "Juan Perez",
+            email: "juan@example.com",
+            tipoUsuario: "CANDIDATO",
+            fotoPerfil: "https://avatar.test/juan.jpg",
+          },
+        });
+
+      const subscribers = await getAllPushSubscribers();
+      expect(subscribers.length).toBe(1);
+      expect(subscribers[0].userId).toBe("user-1");
+      expect(subscribers[0].nombre).toBe("Juan Perez");
+      expect(subscribers[0].email).toBe("juan@example.com");
+      expect(subscribers[0].deviceCount).toBe(1);
+      expect(subscribers[0].devices[0].browser).toBe("Chrome");
+    });
+  });
+
+  describe("getPushSubscribers handler", () => {
+    it("returns 200 with subscriber list and counters", async () => {
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+      const res: any = await getPushSubscribers({} as any, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data).toHaveProperty("subscribers");
+      expect(data).toHaveProperty("totalUsers");
+      expect(data).toHaveProperty("totalDevices");
+    });
+  });
+
+  describe("sendCustomPushNotification handler", () => {
+    it("returns 400 when title or message is missing", async () => {
+      const res: any = await sendCustomPushNotification(
+        { body: JSON.stringify({ title: "" }) } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("sends notifications to selected users", async () => {
+      // Mock Query for user push subs
+      mockDynamoSend.mockResolvedValue({
+        Items: [
+          {
+            endpoint: "https://push.example.com/sub/user1",
+            keys: { p256dh: "p256", auth: "auth" },
+          },
+        ],
+      });
+
+      const res: any = await sendCustomPushNotification(
+        {
+          body: JSON.stringify({
+            targetType: "selected",
+            userIds: ["user-1"],
+            title: "Nueva oferta",
+            message: "Revisa esta vacante destacada",
+            image: "https://images.test/banner.jpg",
+            url: "/vacancies/123",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.targetedUsers).toBe(1);
+      expect(data.sent).toBe(1);
+    });
+  });
 });
+

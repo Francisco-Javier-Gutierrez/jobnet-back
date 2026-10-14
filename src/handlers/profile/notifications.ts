@@ -5,6 +5,8 @@ import {
   savePushSubscription as saveSubService,
   removePushSubscription as removeSubService,
   DEFAULT_VAPID_PUBLIC_KEY,
+  getAllPushSubscribers,
+  createUserNotification,
 } from "../../utils/webPushService";
 
 // Obtener notificaciones del usuario
@@ -274,3 +276,128 @@ export const getVapidPublicKey: APIGatewayProxyHandler = async () => {
     }),
   };
 };
+
+// Listar suscriptores de notificaciones push (Consola de Administración)
+export const getPushSubscribers: APIGatewayProxyHandler = async () => {
+  try {
+    const subscribers = await getAllPushSubscribers();
+    const totalDevices = subscribers.reduce(
+      (acc, u) => acc + (u.devices?.length || 0),
+      0,
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        subscribers,
+        totalUsers: subscribers.length,
+        totalDevices,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+// Enviar notificación push personalizada (Consola de Administración)
+export const sendCustomPushNotification: APIGatewayProxyHandler = async (
+  event,
+) => {
+  try {
+    const body = JSON.parse(event.body || "{}");
+    const {
+      targetType = "all", // "all" | "selected"
+      userIds = [],
+      title,
+      message,
+      url = "/notifications",
+      icon = "/logotipo.svg",
+      image,
+      tag = "jobnet-admin-broadcast",
+    } = body;
+
+    if (!title || !message) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "Missing required fields: 'title' and 'message'",
+        }),
+      };
+    }
+
+    let targetUserIds: string[] = [];
+
+    if (
+      targetType === "selected" &&
+      Array.isArray(userIds) &&
+      userIds.length > 0
+    ) {
+      targetUserIds = [...new Set(userIds)];
+    } else {
+      const allSubscribers = await getAllPushSubscribers();
+      targetUserIds = allSubscribers.map((u) => u.userId);
+    }
+
+    if (targetUserIds.length === 0) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "No target users found with active push subscriptions.",
+        }),
+      };
+    }
+
+    let totalSent = 0;
+    let totalFailed = 0;
+
+    await Promise.all(
+      targetUserIds.map(async (userId) => {
+        try {
+          await createUserNotification({
+            userId,
+            title,
+            message,
+            type: "admin_custom_broadcast",
+            url,
+            extra: {
+              icon,
+              image: image || undefined,
+              tag,
+              source: "ADMIN_CONSOLE",
+              broadcastAt: new Date().toISOString(),
+            },
+          });
+          totalSent++;
+        } catch (err) {
+          totalFailed++;
+          console.error(`Error sending custom push to user ${userId}:`, err);
+        }
+      }),
+    );
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        message: "Notifications dispatched successfully",
+        targetedUsers: targetUserIds.length,
+        sent: totalSent,
+        failed: totalFailed,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
