@@ -30,19 +30,6 @@ resource "aws_cognito_user_pool" "pool" {
     attribute_data_type      = "String"
     developer_only_attribute = false
     mutable                  = true
-    name                     = "groups"
-    required                 = false
-
-    string_attribute_constraints {
-      min_length = 1
-      max_length = 256
-    }
-  }
-
-  schema {
-    attribute_data_type      = "String"
-    developer_only_attribute = false
-    mutable                  = true
     name                     = "role"
     required                 = false
 
@@ -80,9 +67,36 @@ resource "aws_cognito_user_pool" "pool" {
   }
 
   # The PostConfirmation trigger is managed by Serverless Framework,
-  # so we ignore lambda_config changes to avoid Terraform removing it.
+  # and existing schema attributes cannot be deleted via AWS API,
+  # so we ignore lambda_config and schema changes.
   lifecycle {
-    ignore_changes = [lambda_config]
+    ignore_changes = [lambda_config, schema]
+  }
+}
+
+resource "aws_cognito_resource_server" "resource_server" {
+  identifier   = "jobnet"
+  name         = "JobNet Resource Server"
+  user_pool_id = aws_cognito_user_pool.pool.id
+
+  scope {
+    scope_name        = "admin"
+    scope_description = "Admin access to JobNet resources"
+  }
+
+  scope {
+    scope_name        = "moderator"
+    scope_description = "Moderator access to JobNet resources"
+  }
+
+  scope {
+    scope_name        = "organization"
+    scope_description = "Organization access to JobNet resources"
+  }
+
+  scope {
+    scope_name        = "candidate"
+    scope_description = "Candidate access to JobNet resources"
   }
 }
 
@@ -90,29 +104,29 @@ resource "aws_cognito_user_pool_client" "client" {
   name         = "jobnet-app-client-${var.environment}"
   user_pool_id = aws_cognito_user_pool.pool.id
 
-  generate_secret     = false
-  explicit_auth_flows = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-}
-
-resource "aws_cognito_user_group" "group_candidato" {
-  name         = "CANDIDATO"
-  user_pool_id = aws_cognito_user_pool.pool.id
-}
-
-resource "aws_cognito_user_group" "group_organizacion" {
-  name         = "ORGANIZACION"
-  description  = "Grupo de Organizaciones de JobNet"
-  user_pool_id = aws_cognito_user_pool.pool.id
-}
-
-resource "aws_cognito_user_group" "group_admin" {
-  name         = "ADMIN"
-  user_pool_id = aws_cognito_user_pool.pool.id
-}
-
-resource "aws_cognito_user_group" "group_moderator" {
-  name         = "MODERATOR"
-  user_pool_id = aws_cognito_user_pool.pool.id
+  generate_secret                      = false
+  explicit_auth_flows                  = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_SRP_AUTH"]
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code", "implicit"]
+  allowed_oauth_scopes = [
+    "email",
+    "openid",
+    "profile",
+    "jobnet/admin",
+    "jobnet/moderator",
+    "jobnet/organization",
+    "jobnet/candidate"
+  ]
+  callback_urls = [
+    "http://localhost:3000/api/auth/callback/cognito",
+    "https://jobnet.franciscojgh.com/api/auth/callback/cognito"
+  ]
+  logout_urls = [
+    "http://localhost:3000",
+    "https://jobnet.franciscojgh.com"
+  ]
+  supported_identity_providers = ["COGNITO"]
+  depends_on                   = [aws_cognito_resource_server.resource_server]
 }
 
 resource "aws_dynamodb_table" "jobs" {

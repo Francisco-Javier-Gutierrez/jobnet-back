@@ -8,10 +8,6 @@ import {
   PutCommand,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
-import {
-  CognitoIdentityProviderClient,
-  AdminAddUserToGroupCommand,
-} from "@aws-sdk/client-cognito-identity-provider";
 
 const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -27,7 +23,6 @@ const dynamoClient = isOffline
   : new DynamoDBClient({});
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient);
-const cognitoClient = new CognitoIdentityProviderClient({});
 
 export const handler: PostConfirmationTriggerHandler = async (
   event: PostConfirmationTriggerEvent,
@@ -40,7 +35,6 @@ export const handler: PostConfirmationTriggerHandler = async (
   const userAttributes = event.request.userAttributes;
   const email = userAttributes.email;
   const sub = userAttributes.sub;
-  const username = event.userName;
 
   const rawRole =
     event.request.clientMetadata?.tipoUsuario ||
@@ -72,56 +66,40 @@ export const handler: PostConfirmationTriggerHandler = async (
   const nombre =
     event.request.clientMetadata?.nombre || userAttributes.name || "Sin Nombre";
 
-  // 1. Asignar el usuario al grupo de Cognito (se omite si es usuario PENDIENTE/blank)
-  const userPoolId = event.userPoolId || process.env.COGNITO_USER_POOL_ID;
-  if (
-    userPoolId &&
-    userPoolId !== "us-east-1_local" &&
-    tipoUsuario !== "PENDIENTE"
-  ) {
-    try {
-      await cognitoClient.send(
-        new AdminAddUserToGroupCommand({
-          UserPoolId: userPoolId,
-          Username: username,
-          GroupName: tipoUsuario,
-        }),
-      );
-      console.log(
-        `Usuario asignado al grupo ${tipoUsuario} en UserPool ${userPoolId}`,
-      );
-    } catch (error: unknown) {
-      console.error("Error asignando grupo en Cognito:", error);
-    }
-  }
-
-  // 2. Preparar el objeto base a insertar en DynamoDB
+  // 1. Preparar el objeto base a insertar en DynamoDB (Cognito Groups deprecados en favor de Scopes)
+  const estadoCuenta = tipoUsuario === "PENDIENTE" ? "PENDIENTE_ROL" : "ACTIVO";
   const baseUser = {
     PK: `USER#${sub}`,
     SK: "PROFILE",
+    GSI1PK: "PROFILE",
+    GSI1SK: `ROLE#${tipoUsuario}#STATUS#${estadoCuenta}`,
     tipoUsuario,
     email,
     nombre,
-    estadoCuenta: tipoUsuario === "PENDIENTE" ? "PENDIENTE_ROL" : "ACTIVO",
+    estadoCuenta,
     fechaCreacion: new Date().toISOString(),
   };
 
-  // 3. Completar con atributos específicos según el rol
+  // 2. Completar con atributos específicos según el rol
   const userItem = { ...baseUser };
 
   if (tipoUsuario === "PENDIENTE") {
     Object.assign(userItem, {
       fotoPerfil: "",
       biografia:
-        "Usuario sin rol asignado. Pendiente de asignación manual de grupo Cognito por un Administrador.",
+        "Usuario sin rol asignado. Pendiente de asignación de rol por un Administrador.",
     });
-  } else if (tipoUsuario === "ADMIN") {
-    // Nada más que agregar
-  } else if (tipoUsuario === "MODERATOR") {
-    userItem.nombre = nombre;
+  } else if (tipoUsuario === "ADMIN" || tipoUsuario === "MODERATOR") {
+    Object.assign(userItem, {
+      fotoPerfil: "",
+      biografia: "",
+      enlacesWeb: {},
+      ubicacion: {},
+    });
   } else if (tipoUsuario === "ORGANIZACION") {
     Object.assign(userItem, {
       taxId: userAttributes["custom:tax_id"] || "",
+      telefono: userAttributes["phone_number"] || "",
       fotoPerfil: "",
       biografia: "",
       enlacesWeb: {},
@@ -129,6 +107,7 @@ export const handler: PostConfirmationTriggerHandler = async (
       organizacionVerificada: false,
     });
   } else {
+    // CANDIDATO fallback
     Object.assign(userItem, {
       fotoPerfil: "",
       biografia: "",
@@ -139,7 +118,7 @@ export const handler: PostConfirmationTriggerHandler = async (
     });
   }
 
-  // 4. RF-74: Restricción de Registro por Dominios Bloqueados
+  // 3. RF-74: Restricción de Registro por Dominios Bloqueados
   if (tipoUsuario === "ORGANIZACION" && email && email.includes("@")) {
     const domain = email.split("@")[1].toLowerCase().trim();
     const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
@@ -166,7 +145,7 @@ export const handler: PostConfirmationTriggerHandler = async (
     }
   }
 
-  // 5. Guardar en DynamoDB
+  // 4. Guardar en DynamoDB
   if (process.env.DYNAMODB_TABLE) {
     try {
       await docClient.send(

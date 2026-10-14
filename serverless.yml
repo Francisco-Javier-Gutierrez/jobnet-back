@@ -30,6 +30,9 @@ provider:
     S3_UPLOAD_BUCKET: jobnet-uploads-${self:provider.stage}
     COGNITO_USER_POOL_ID: ${env:COGNITO_USER_POOL_ID, 'us-east-1_trquL61F2'}
     COGNITO_CLIENT_ID: ${env:COGNITO_CLIENT_ID, '4ef8k4tofjj4ounvo8nf7d9pep'}
+    VAPID_PUBLIC_KEY: ${env:VAPID_PUBLIC_KEY, 'BOIrktuQCHHiOWcKICA7YEwdKJf8WNYCmBS_PI338wnaB9VqXPQfCRwTN5NLYokujXBp5pdD83av6DACG2rAYok'}
+    VAPID_PRIVATE_KEY: ${env:VAPID_PRIVATE_KEY, 'oJXO_P5wuj45JaC8taPC1E3pPR8Hu1zi_kAiv5yAaNg'}
+    VAPID_SUBJECT: ${env:VAPID_SUBJECT, 'mailto:contacto@franciscojgh.com'}
   iam:
     role:
       statements:
@@ -55,10 +58,6 @@ provider:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}/stream/*"
         - Effect: Allow
           Action:
-            - cognito-idp:AdminAddUserToGroup
-          Resource: "arn:aws:cognito-idp:${self:provider.region}:*:userpool/*"
-        - Effect: Allow
-          Action:
             - s3:PutObject
             - s3:GetObject
             - s3:PutObjectAcl
@@ -74,9 +73,15 @@ plugins:
 custom:
   esbuild:
     bundle: true
-    minify: false
-    sourcemap: true
-    exclude: []
+    minify: true
+    sourcemap: false
+    exclude:
+      - "@aws-sdk/client-apigatewaymanagementapi"
+      - "@aws-sdk/client-dynamodb"
+      - "@aws-sdk/client-s3"
+      - "@aws-sdk/client-ses"
+      - "@aws-sdk/lib-dynamodb"
+      - "@aws-sdk/s3-request-presigner"
     target: node20
     platform: node
     concurrency: 1
@@ -229,6 +234,24 @@ functions:
       - httpApi:
           path: /profile/{id}/notifications/read-all
           method: post
+  savePushSubscription:
+    handler: src/handlers/profile.savePushSubscription
+    events:
+      - httpApi:
+          path: /profile/{id}/push-subscriptions
+          method: post
+  deletePushSubscription:
+    handler: src/handlers/profile.deletePushSubscription
+    events:
+      - httpApi:
+          path: /profile/{id}/push-subscriptions
+          method: delete
+  getVapidPublicKey:
+    handler: src/handlers/profile.getVapidPublicKey
+    events:
+      - httpApi:
+          path: /push/vapid-key
+          method: get
   getVerificationRequests:
     handler: src/handlers/moderator.getVerificationRequests
     events:
@@ -259,6 +282,12 @@ functions:
       - httpApi:
           path: /moderator/organizations/{id}/confirm-suspension
           method: post
+  toggleUserBlock:
+    handler: src/handlers/moderator.toggleUserBlock
+    events:
+      - httpApi:
+          path: /moderator/users/{id}/block
+          method: post
   getSuspensionStatus:
     handler: src/handlers/moderator.getSuspensionStatus
     events:
@@ -279,7 +308,7 @@ functions:
     handler: src/handlers/wsHandlers.getAppealMessages
     events:
       - httpApi:
-          path: /moderator/organizations/{id}/appeal-messages
+          path: /moderator/appeals/{id}/messages
           method: get
   joinAppeal:
     handler: src/handlers/moderator.joinAppeal
@@ -291,7 +320,7 @@ functions:
     handler: src/handlers/wsHandlers.sendAppealMessageHttp
     events:
       - httpApi:
-          path: /moderator/organizations/{id}/appeal-messages
+          path: /moderator/appeals/{id}/messages
           method: post
   getAppeals:
     handler: src/handlers/moderator.getAppeals
@@ -432,6 +461,39 @@ functions:
       - httpApi:
           path: /posts/{id}/bookmark
           method: post
-
-
-
+  sharePost:
+    handler: src/handlers/posts.sharePost
+    events:
+      - httpApi:
+          path: /posts/{id}/share
+          method: post
+  toggleLikeJob:
+    handler: src/handlers/jobs.toggleLikeJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/like
+          method: post
+  addCommentJob:
+    handler: src/handlers/jobs.addCommentJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/comment
+          method: post
+  deleteCommentJob:
+    handler: src/handlers/jobs.deleteCommentJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/comment/{commentId}
+          method: delete
+  toggleBookmarkJob:
+    handler: src/handlers/jobs.toggleBookmarkJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/bookmark
+          method: post
+  shareJob:
+    handler: src/handlers/jobs.shareJob
+    events:
+      - httpApi:
+          path: /jobs/{id}/share
+          method: post

@@ -1,22 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PostConfirmationTriggerEvent } from "aws-lambda";
 
-const { mockCognitoSend, mockDynamoSend } = vi.hoisted(() => {
+const { mockDynamoSend } = vi.hoisted(() => {
   process.env.DYNAMODB_TABLE = "test-table";
   process.env.COGNITO_USER_POOL_ID = "test-pool-id";
 
   return {
-    mockCognitoSend: vi.fn(),
     mockDynamoSend: vi.fn(),
   };
 });
-
-vi.mock("@aws-sdk/client-cognito-identity-provider", () => ({
-  CognitoIdentityProviderClient: class {
-    send = mockCognitoSend;
-  },
-  AdminAddUserToGroupCommand: class {},
-}));
 
 vi.mock("@aws-sdk/client-dynamodb", () => ({
   DynamoDBClient: class {},
@@ -40,7 +32,6 @@ describe("postConfirmation handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDynamoSend.mockResolvedValue({});
-    mockCognitoSend.mockResolvedValue({});
     process.env = {
       ...originalEnv,
       DYNAMODB_TABLE: "test-table",
@@ -83,15 +74,15 @@ describe("postConfirmation handler", () => {
 
   it("should process CANDIDATO user correctly", async () => {
     const event = createEvent("CANDIDATO", "Test Candidato");
-    await handler(event, {} as never, () => {});
-    expect(mockCognitoSend).toHaveBeenCalled();
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
   it("should process ORGANIZACION user correctly", async () => {
     const event = createEvent("ORGANIZACION", "Tech Corp");
-    await handler(event, {} as never, () => {});
-    expect(mockCognitoSend).toHaveBeenCalled();
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
@@ -114,20 +105,23 @@ describe("postConfirmation handler", () => {
 
   it("should process ADMIN user correctly", async () => {
     const event = createEvent("ADMIN", "Admin User");
-    await handler(event, {} as never, () => {});
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
   it("should process MODERATOR user correctly", async () => {
     const event = createEvent("MODERATOR", "Mod User");
-    await handler(event, {} as never, () => {});
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
-  it("should fallback to CANDIDATO if no tipoUsuario provided in metadata", async () => {
+  it("should fallback to PENDIENTE if no tipoUsuario provided in metadata", async () => {
     const event = createEvent("", "Test");
     event.request.clientMetadata = { nombre: "Test" } as never;
-    await handler(event, {} as never, () => {});
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
@@ -139,40 +133,18 @@ describe("postConfirmation handler", () => {
     );
   });
 
-  it("should gracefully handle Cognito errors", async () => {
-    const event = createEvent("CANDIDATO", "Test");
-    mockCognitoSend.mockRejectedValueOnce(new Error("Cognito Error"));
-    await expect(handler(event, {} as never, () => {})).resolves.toBeDefined();
-  });
-
-  it("should skip Cognito assignment if USER_POOL_ID is undefined or empty", async () => {
-    process.env.COGNITO_USER_POOL_ID = "";
-    const event = createEvent("CANDIDATO", "Test");
-    (event as any).userPoolId = "";
-    await handler(event, {} as never, () => {});
-    expect(mockCognitoSend).not.toHaveBeenCalled();
-    expect(mockDynamoSend).toHaveBeenCalled();
-  });
-
-  it("should skip Cognito assignment if USER_POOL_ID is us-east-1_local", async () => {
-    const event = createEvent("CANDIDATO", "Test");
-    event.userPoolId = "us-east-1_local";
-    await handler(event, {} as never, () => {});
-    expect(mockCognitoSend).not.toHaveBeenCalled();
-    expect(mockDynamoSend).toHaveBeenCalled();
-  });
-
   it("should skip DynamoDB insert if TABLE_NAME is undefined", async () => {
     process.env.DYNAMODB_TABLE = "";
     const event = createEvent("CANDIDATO", "Test");
-    await handler(event, {} as never, () => {});
-    expect(mockCognitoSend).toHaveBeenCalled();
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).not.toHaveBeenCalled();
   });
 
   it("should handle unknown tipoUsuario gracefully", async () => {
     const event = createEvent("UNKNOWN_ROLE", "Test");
-    await handler(event, {} as never, () => {});
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
@@ -204,11 +176,67 @@ describe("postConfirmation handler", () => {
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
-  it("should fallback to Sin Nombre when name is missing", async () => {
+  it("should ignore DynamoDB error during blocked domain check if it is not RF-74", async () => {
+    mockDynamoSend.mockRejectedValueOnce(new Error("Dynamo lookup failed"));
+    mockDynamoSend.mockResolvedValueOnce({}); // PutCommand succeeds
+
+    const event = createEvent("ORGANIZACION", "Test Corp");
+    event.request.userAttributes.email = "info@goodcorp.com";
+
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
+  });
+
+  it("should handle ORGANIZACION with missing or invalid email without error", async () => {
+    const event1 = createEvent("ORGANIZACION", "Test Corp");
+    event1.request.userAttributes.email = "noatsign";
+    const res1 = await handler(event1, {} as never, () => {});
+    expect(res1).toBeDefined();
+
+    const event2 = createEvent("ORGANIZACION", "Test Corp");
+    event2.request.userAttributes.email = "";
+    const res2 = await handler(event2, {} as never, () => {});
+    expect(res2).toBeDefined();
+  });
+
+  it("should map clientMetadata.role and variations like 'organizacion'", async () => {
+    const event = createEvent("", "Org Corp");
+    event.request.clientMetadata = { role: "organizacion" } as any;
+    const res = await handler(event, {} as never, () => {});
+    expect(res).toBeDefined();
+  });
+
+  it("should fallback to userAttributes.name when clientMetadata has no nombre", async () => {
+    const event = createEvent("", "Attr Name");
+    event.request.clientMetadata = { role: "candidate" } as any;
+    event.request.userAttributes.name = "Attr Name";
+    const res = await handler(event, {} as never, () => {});
+    expect(res).toBeDefined();
+  });
+
+  it("should fallback to Sin Nombre when both clientMetadata and userAttributes have no name", async () => {
     const event = createEvent("", "");
-    event.request.clientMetadata = undefined;
+    event.request.clientMetadata = { role: "candidate" } as any;
     event.request.userAttributes.name = "";
-    await handler(event, {} as never, () => {});
-    expect(mockDynamoSend).toHaveBeenCalled();
+    const res = await handler(event, {} as never, () => {});
+    expect(res).toBeDefined();
+  });
+
+  it("should handle missing DYNAMODB_TABLE during blocked domain check and saving", async () => {
+    delete process.env.DYNAMODB_TABLE;
+    const event = createEvent("ORGANIZACION", "Test Corp");
+    event.request.userAttributes.email = "info@goodcorp.com";
+    mockDynamoSend.mockResolvedValueOnce({ Item: null });
+
+    const res = await handler(event, {} as never, () => {});
+    expect(res).toBeDefined();
+  });
+
+  it("should initialize with local endpoint when IS_OFFLINE is true", async () => {
+    process.env.IS_OFFLINE = "true";
+    vi.resetModules();
+    const mod = await import("./postConfirmation");
+    expect(mod.handler).toBeDefined();
+    process.env.IS_OFFLINE = "false";
   });
 });

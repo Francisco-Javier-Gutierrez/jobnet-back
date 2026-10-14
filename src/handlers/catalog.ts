@@ -2,7 +2,7 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient,
-  ScanCommand,
+  QueryCommand,
   PutCommand,
   DeleteCommand,
   GetCommand,
@@ -27,11 +27,12 @@ const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 export const getCatalog: APIGatewayProxyHandler = async () => {
   try {
     const result = await docClient.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: tableName,
-        FilterExpression: "SK = :sk",
+        IndexName: "GSI1",
+        KeyConditionExpression: "GSI1PK = :pk",
         ExpressionAttributeValues: {
-          ":sk": "CATALOG",
+          ":pk": "CATALOG",
         },
       }),
     );
@@ -85,13 +86,14 @@ export const createCatalogItem: APIGatewayProxyHandler = async (event) => {
 
     // Check duplicates
     const existing = await docClient.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: tableName,
-        FilterExpression:
-          "SK = :sk AND category = :category AND valName = :valName",
+        IndexName: "GSI1",
+        KeyConditionExpression: "GSI1PK = :gsiPk AND GSI1SK = :gsiSk",
+        FilterExpression: "valName = :valName",
         ExpressionAttributeValues: {
-          ":sk": "CATALOG",
-          ":category": category,
+          ":gsiPk": "CATALOG",
+          ":gsiSk": `CATEGORY#${category}`,
           ":valName": name.toLowerCase().trim(),
         },
       }),
@@ -114,6 +116,8 @@ export const createCatalogItem: APIGatewayProxyHandler = async (event) => {
     const item = {
       PK: `CATALOG#${itemId}`,
       SK: "CATALOG",
+      GSI1PK: "CATALOG",
+      GSI1SK: `CATEGORY#${category}`,
       name: name.trim(),
       valName: name.toLowerCase().trim(),
       category,
@@ -208,13 +212,14 @@ export const updateCatalogItem: APIGatewayProxyHandler = async (event) => {
     const existingItem = getResult.Item as any;
 
     const duplicate = await docClient.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: tableName,
-        FilterExpression:
-          "SK = :sk AND category = :category AND valName = :valName AND PK <> :pk",
+        IndexName: "GSI1",
+        KeyConditionExpression: "GSI1PK = :gsiPk AND GSI1SK = :gsiSk",
+        FilterExpression: "valName = :valName AND PK <> :pk",
         ExpressionAttributeValues: {
-          ":sk": "CATALOG",
-          ":category": existingItem.category,
+          ":gsiPk": "CATALOG",
+          ":gsiSk": `CATEGORY#${existingItem.category}`,
           ":valName": name.toLowerCase().trim(),
           ":pk": `CATALOG#${id}`,
         },
