@@ -3,7 +3,7 @@ name: Deploy Backend
 on:
   push:
     branches:
-      - deployment
+      - main
 
 jobs:
   deploy:
@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: 18
+          node-version: 20
 
       - name: Install Dependencies
         run: npm install
@@ -44,12 +44,31 @@ jobs:
 
       - name: Deploy Serverless
         run: |
-          COGNITO_USER_POOL_ARN="arn:aws:cognito-idp:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:userpool/$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
+          # Deploy Lambdas only
           S3_UPLOAD_BUCKET="$(cd terraform/environments/prod && terraform output -raw s3_upload_bucket)"
           COGNITO_USER_POOL_ID="$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
           OPENSEARCH_ENDPOINT="$(cd terraform/environments/prod && terraform output -raw opensearch_endpoint)"
-          export COGNITO_USER_POOL_ARN
           export S3_UPLOAD_BUCKET
           export COGNITO_USER_POOL_ID
           export OPENSEARCH_ENDPOINT
           npx serverless deploy --stage prod
+
+      - name: Terraform API Init
+        run: |
+          cd terraform/environments/prod-api
+          terraform init
+
+      - name: Terraform API Apply
+        run: |
+          export TF_VAR_lambda_arn_getJobs="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-getJobs"
+          export TF_VAR_lambda_arn_createJob="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-createJob"
+          export TF_VAR_lambda_arn_getUploadPresignedUrl="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-getUploadPresignedUrl"
+          export TF_VAR_lambda_arn_sendNotificationEmail="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-sendNotificationEmail"
+          export TF_VAR_lambda_arn_wsAuthorizer="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsAuthorizer"
+          export TF_VAR_lambda_arn_wsConnect="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsConnect"
+          export TF_VAR_lambda_arn_wsDisconnect="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsDisconnect"
+          export TF_VAR_lambda_arn_wsDefault="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsDefault"
+          export TF_VAR_cognito_user_pool_arn="arn:aws:cognito-idp:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:userpool/$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
+
+          cd terraform/environments/prod-api
+          terraform apply -auto-approve

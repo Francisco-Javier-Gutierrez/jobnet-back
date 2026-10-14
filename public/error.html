@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Acceso no disponible — JobNet</title>
+
+    <!-- Modern Typography: Outfit & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Material Symbols Icons -->
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
+    />
+
+    <style>
+      :root {
+        --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+        --card-bg: #ffffff;
+        --card-border: rgba(226, 232, 240, 0.8);
+        --text-main: #0f172a;
+        --text-sub: #64748b;
+        --primary: #4f46e5;
+        --primary-hover: #4338ca;
+        --accent-bg: rgba(79, 70, 229, 0.08);
+        --icon-bg: #fef2f2;
+        --icon-color: #ef4444;
+        --shadow:
+          0 20px 25px -5px rgba(15, 23, 42, 0.08),
+          0 8px 10px -6px rgba(15, 23, 42, 0.04);
+        --btn-secondary-bg: #f1f5f9;
+        --btn-secondary-text: #334155;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg-gradient: linear-gradient(135deg, #0b0f19 0%, #0f172a 100%);
+          --card-bg: #1e293b;
+          --card-border: rgba(51, 65, 85, 0.6);
+          --text-main: #f8fafc;
+          --text-sub: #94a3b8;
+          --primary: #6366f1;
+          --primary-hover: #4f46e5;
+          --accent-bg: rgba(99, 102, 241, 0.15);
+          --icon-bg: rgba(239, 68, 68, 0.15);
+          --icon-color: #f87171;
+          --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+          --btn-secondary-bg: #334155;
+          --btn-secondary-text: #cbd5e1;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Inter", sans-serif;
+        background: var(--bg-gradient);
+        color: var(--text-main);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+
+      .container {
+        width: 100%;
+        max-width: 480px;
+        background: var(--card-bg);
+        border: 1px solid var(--card-border);
+        border-radius: 1.5rem;
+        padding: 2.5rem 2rem;
+        box-shadow: var(--shadow);
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+        backdrop-filter: blur(12px);
+        animation: fadeIn 0.4s ease-out forwards;
+      }
+
+      .accent-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 6px;
+        background: linear-gradient(
+          90deg,
+          #ef4444 0%,
+          #f59e0b 50%,
+          #6366f1 100%
+        );
+      }
+
+      .icon-wrapper {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 1.5rem auto;
+        background: var(--icon-bg);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+      }
+
+      .icon-wrapper::after {
+        content: "";
+        position: absolute;
+        inset: -6px;
+        border-radius: 50%;
+        border: 2px dashed var(--icon-color);
+        opacity: 0.3;
+        animation: spin 12s linear infinite;
+      }
+
+      .icon-wrapper span {
+        font-size: 40px;
+        color: var(--icon-color);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--accent-bg);
+        color: var(--primary);
+        font-family: "Outfit", sans-serif;
+        font-size: 0.8rem;
+        font-weight: 700;
+        padding: 0.35rem 0.85rem;
+        border-radius: 9999px;
+        margin-bottom: 1.25rem;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        font-family: "Outfit", sans-serif;
+        font-size: 1.65rem;
+        font-weight: 700;
+        margin-bottom: 0.75rem;
+        line-height: 1.25;
+        letter-spacing: -0.02em;
+      }
+
+      p {
+        font-size: 0.925rem;
+        color: var(--text-sub);
+        line-height: 1.6;
+        margin-bottom: 2rem;
+      }
+
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        padding: 0.85rem 1.25rem;
+        border-radius: 0.85rem;
+        font-family: "Outfit", sans-serif;
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-decoration: none;
+        cursor: pointer;
+        border: none;
+        transition: all 0.2s ease;
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: #ffffff;
+        box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25);
+      }
+
+      .btn-primary:hover {
+        background: var(--primary-hover);
+        transform: translateY(-1px);
+      }
+
+      .btn-secondary {
+        background: var(--btn-secondary-bg);
+        color: var(--btn-secondary-text);
+      }
+
+      .btn-secondary:hover {
+        opacity: 0.9;
+      }
+
+      .footer-brand {
+        margin-top: 2rem;
+        font-size: 0.75rem;
+        color: var(--text-sub);
+        opacity: 0.7;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
+
+      #closeNotice {
+        display: none;
+        margin-top: 1rem;
+        padding: 0.75rem 1rem;
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.2);
+        border-radius: 0.75rem;
+        font-size: 0.8rem;
+        color: var(--text-sub);
+        line-height: 1.4;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(12px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="accent-bar"></div>
+
+      <div class="icon-wrapper">
+        <span class="material-symbols-outlined">link_off</span>
+      </div>
+
+      <div class="badge">
+        <span class="material-symbols-outlined" style="font-size: 14px"
+          >lock</span
+        >
+        Ruta o Documento no disponible
+      </div>
+
+      <h1>Ruta de Archivo Invalida</h1>
+
+      <p>
+        El archivo al que intentas acceder no existe, ha sido movido o la
+        dirección URL ingresada es incorrecta.
+      </p>
+
+      <div class="actions">
+        <a href="https://dsty3j5u0b31g.cloudfront.net" class="btn btn-primary">
+          <span class="material-symbols-outlined" style="font-size: 18px"
+            >home</span
+          >
+          Volver a JobNet
+        </a>
+
+        <button
+          type="button"
+          onclick="closeWindowOnly()"
+          class="btn btn-secondary"
+        >
+          <span class="material-symbols-outlined" style="font-size: 18px"
+            >close</span
+          >
+          Cerrar Ventana
+        </button>
+      </div>
+
+      <div id="closeNotice">
+        Tu navegador bloqueó el cierre automático de esta pestaña. Por favor
+        ciérrala manualmente con <strong>Ctrl + W</strong> o
+        <strong>⌘ + W</strong>.
+      </div>
+
+      <div class="footer-brand">
+        <span
+          class="material-symbols-outlined"
+          style="font-size: 14px; color: var(--primary)"
+          >work</span
+        >
+        <span>JobNet Enterprise Storage Platform</span>
+      </div>
+    </div>
+
+    <script>
+      function closeWindowOnly() {
+        try {
+          window.close();
+        } catch (e) {}
+        try {
+          self.close();
+        } catch (e) {}
+        try {
+          window.open("", "_self", "");
+          window.close();
+        } catch (e) {}
+
+        setTimeout(function () {
+          var notice = document.getElementById("closeNotice");
+          if (notice) {
+            notice.style.display = "block";
+          }
+        }, 100);
+      }
+    </script>
+  </body>
+</html>

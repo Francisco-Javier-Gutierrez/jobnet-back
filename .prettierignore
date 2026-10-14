@@ -1,0 +1,13 @@
+# Ignore git and node modules
+.git
+node_modules
+dist
+.serverless
+.esbuild
+coverage
+
+# Ignore CI and YML files as requested
+.github/workflows/*.yml
+*.yml
+*.yaml
+package-lock.json
