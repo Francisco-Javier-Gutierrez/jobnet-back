@@ -92,10 +92,11 @@ Para asegurar la integridad de la base de datos y la consistencia de los datos e
   - **Sort Key (SK)**: Debe definir lógicamente la partición (ej. `PROFILE` para el perfil, `METADATA` para configuraciones, `MSG#<timestamp>` para mensajes).
 - **Ausencia de Campos Nulos**: Debido a que DynamoDB es NoSQL sin esquema rígido, **no se deben guardar campos vacíos o nulos** en la base de datos. Si un atributo no le pertenece a un rol o está vacío, simplemente no debe existir en su registro.
 
-### B. Mapeo de Roles de Usuario y Cognito Groups
+### B. Mapeo de Roles de Usuario y Cognito Scopes
 
-- Al confirmar un registro, la Lambda `postConfirmation` normaliza los roles y asigna el usuario a su respectivo grupo en Cognito (`ADMIN`, `MODERATOR`, `EMPRESA`, `CANDIDATO`).
-- Si el rol proviene de campos como `custom:role` (ej. `'company'`, `'candidate'`), debe mapearse y traducirse de forma estricta a los grupos en mayúsculas de AWS Cognito y DynamoDB (`EMPRESA`, `CANDIDATO`).
+- La autenticación y autorización se basan en **Cognito Scopes** (OAuth 2.0 Resource Server Scopes: `jobnet/admin`, `jobnet/moderator`, `jobnet/organization`, `jobnet/candidate`) y roles en base de datos (`ADMIN`, `MODERATOR`, `ORGANIZACION`, `CANDIDATO`).
+- Los antiguos grupos de Cognito (`Cognito Groups`) y triggers que dependían de ellos (como la asignación en `postConfirmation` o la sincronización en `preTokenGeneration`) han quedado **obsoletos**.
+- Al confirmar un registro, la Lambda `postConfirmation` persiste el perfil base en DynamoDB y valida las restricciones de dominio corporativo (RF-74), sin manipular grupos de Cognito.
 
 ### C. Desarrollo Local con Serverless Offline
 

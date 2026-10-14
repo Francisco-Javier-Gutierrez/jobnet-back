@@ -20,6 +20,9 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   ScanCommand: class {
     constructor(public params: any) {}
   },
+  QueryCommand: class {
+    constructor(public params: any) {}
+  },
   PutCommand: class {
     constructor(public params: any) {}
   },
@@ -64,6 +67,13 @@ describe("catalog handler", () => {
       expect(body[0].name).toBe("React");
     });
 
+    it("should return empty list when result.Items is empty or null", async () => {
+      mockDynamoSend.mockResolvedValueOnce({});
+      const response = await getCatalog({} as any, {} as any, () => {});
+      expect(response.statusCode).toBe(200);
+      expect(JSON.parse(response.body)).toEqual([]);
+    });
+
     it("should return 500 on DynamoDB error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Dynamo error"));
       const response = await getCatalog({} as any, {} as any, () => {});
@@ -73,13 +83,16 @@ describe("catalog handler", () => {
   });
 
   describe("createCatalogItem", () => {
-    it("should return 400 if name or category is missing", async () => {
-      const event = {
+    it("should return 400 if event body is empty or missing name/category", async () => {
+      const event1 = {} as APIGatewayProxyEvent;
+      const res1 = await createCatalogItem(event1, {} as any, () => {});
+      expect(res1.statusCode).toBe(400);
+
+      const event2 = {
         body: JSON.stringify({ name: "" }),
       } as APIGatewayProxyEvent;
-
-      const response = await createCatalogItem(event, {} as any, () => {});
-      expect(response.statusCode).toBe(400);
+      const res2 = await createCatalogItem(event2, {} as any, () => {});
+      expect(res2.statusCode).toBe(400);
     });
 
     it("should return 400 if item already exists as duplicate", async () => {
@@ -96,7 +109,7 @@ describe("catalog handler", () => {
       expect(JSON.parse(response.body).error).toContain("Ya existe");
     });
 
-    it("should return 201 on success", async () => {
+    it("should return 201 on success with custom id", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // duplicate check empty
       mockDynamoSend.mockResolvedValueOnce({}); // put success
 
@@ -115,6 +128,24 @@ describe("catalog handler", () => {
       expect(body.name).toBe("React");
     });
 
+    it("should generate random id when id is not supplied in body", async () => {
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+      mockDynamoSend.mockResolvedValueOnce({});
+
+      const event = {
+        body: JSON.stringify({
+          name: "TypeScript",
+          category: "Habilidad",
+        }),
+      } as APIGatewayProxyEvent;
+
+      const response = await createCatalogItem(event, {} as any, () => {});
+      expect(response.statusCode).toBe(201);
+      const body = JSON.parse(response.body);
+      expect(body.id).toBeDefined();
+      expect(body.name).toBe("TypeScript");
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("DB error"));
       const event = {
@@ -127,24 +158,32 @@ describe("catalog handler", () => {
   });
 
   describe("updateCatalogItem", () => {
-    it("should return 400 if id path parameter is missing", async () => {
-      const event = {
+    it("should return 400 if id path parameter is missing or event has no pathParameters", async () => {
+      const event1 = {} as any;
+      const res1 = await updateCatalogItem(event1, {} as any, () => {});
+      expect(res1.statusCode).toBe(400);
+
+      const event2 = {
         pathParameters: {},
         body: JSON.stringify({ name: "Vue" }),
       } as any;
-
-      const response = await updateCatalogItem(event, {} as any, () => {});
-      expect(response.statusCode).toBe(400);
+      const res2 = await updateCatalogItem(event2, {} as any, () => {});
+      expect(res2.statusCode).toBe(400);
     });
 
-    it("should return 400 if name is missing in body", async () => {
-      const event = {
+    it("should return 400 if name is missing in body or body is missing", async () => {
+      const event1 = {
+        pathParameters: { id: "1" },
+      } as any;
+      const res1 = await updateCatalogItem(event1, {} as any, () => {});
+      expect(res1.statusCode).toBe(400);
+
+      const event2 = {
         pathParameters: { id: "1" },
         body: JSON.stringify({ name: "" }),
       } as any;
-
-      const response = await updateCatalogItem(event, {} as any, () => {});
-      expect(response.statusCode).toBe(400);
+      const res2 = await updateCatalogItem(event2, {} as any, () => {});
+      expect(res2.statusCode).toBe(400);
     });
 
     it("should return 404 if item does not exist", async () => {
@@ -218,7 +257,10 @@ describe("catalog handler", () => {
   });
 
   describe("deleteCatalogItem", () => {
-    it("should return 400 if id parameter is missing", async () => {
+    it("should return 400 if id parameter is missing or pathParameters is empty", async () => {
+      const res1 = await deleteCatalogItem({} as any, {} as any, () => {});
+      expect(res1.statusCode).toBe(400);
+
       const event = {
         pathParameters: {},
       } as any;
@@ -246,6 +288,40 @@ describe("catalog handler", () => {
 
       const response = await deleteCatalogItem(event, {} as any, () => {});
       expect(response.statusCode).toBe(500);
+    });
+  });
+
+  describe("catalog edge branches", () => {
+    it("should support createCatalogItem with custom id and handle empty body", async () => {
+      // Empty body test
+      const resEmpty = await createCatalogItem({} as any, {} as any, () => {});
+      expect(resEmpty.statusCode).toBe(400);
+
+      const resEmptyUpdate = await updateCatalogItem({ pathParameters: { id: "1" } } as any, {} as any, () => {});
+      expect(resEmptyUpdate.statusCode).toBe(400);
+
+      // Custom ID test
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Query duplicate
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand
+
+      const resCustom = await createCatalogItem(
+        {
+          body: JSON.stringify({ name: "Custom Skill", category: "Habilidad", id: "custom-id-123" }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(resCustom.statusCode).toBe(201);
+      expect(JSON.parse(resCustom.body).id).toBe("custom-id-123");
+    });
+
+    it("should initialize with local endpoint when IS_OFFLINE is true", async () => {
+      const orig = process.env.IS_OFFLINE;
+      process.env.IS_OFFLINE = "true";
+      vi.resetModules();
+      const mod = await import("./catalog");
+      expect(mod.getCatalog).toBeDefined();
+      process.env.IS_OFFLINE = orig;
     });
   });
 });

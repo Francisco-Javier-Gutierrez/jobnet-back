@@ -14,6 +14,7 @@ export interface JobItemInput {
   sectores?: string[];
   descripcion?: string;
   pdfUrl?: string;
+  pdfName?: string;
   estado?: string;
   fechaCreacion?: string;
   createdAt?: string;
@@ -35,6 +36,7 @@ export interface EnrichedJobItem {
   sectores: string[];
   descripcion: string;
   pdfUrl: string;
+  pdfName?: string;
   estado: string;
   estadoBadge: {
     code: string;
@@ -102,7 +104,7 @@ export function formatUbicacion(item: JobItemInput): string {
   if (item.sector) return item.sector;
   const lat = item.ubicacion?.lat ?? item.lat;
   const lng = item.ubicacion?.lng ?? item.lng;
-  if (lat && lng && (lat !== 0 || lng !== 0)) {
+  if (lat !== undefined && lng !== undefined && (lat !== 0 || lng !== 0)) {
     return `Coordenadas (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
   }
   return "Ubicación no especificada";
@@ -137,6 +139,7 @@ export function enrichJobItem(
     sectores: item.sectores || [],
     descripcion: item.descripcion || "Sin descripción",
     pdfUrl: item.pdfUrl || "",
+    pdfName: item.pdfName || "",
     aptitudes: item.aptitudes || "",
     experienciaAnos: item.experienciaAnos || 0,
     estado,
