@@ -39,7 +39,11 @@ describe("profile notifications handlers", () => {
 
   describe("getNotifications", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getNotifications({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getNotifications(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -56,7 +60,11 @@ describe("profile notifications handlers", () => {
         ],
       });
 
-      const res = await getNotifications({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
+      const res = await getNotifications(
+        { pathParameters: { id: "u-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.body);
       expect(data).toHaveLength(1);
@@ -65,14 +73,22 @@ describe("profile notifications handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Notif DB error"));
-      const res = await getNotifications({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
+      const res = await getNotifications(
+        { pathParameters: { id: "u-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("markNotificationRead", () => {
     it("should return 400 if userId or notifId is missing", async () => {
-      const res = await markNotificationRead({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await markNotificationRead(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -88,7 +104,13 @@ describe("profile notifications handlers", () => {
 
     it("should mark notification as read", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [{ PK: "USER#u-1", SK: "NOTIFICATION#2026-01-01#notif-1", id: "notif-1" }],
+        Items: [
+          {
+            PK: "USER#u-1",
+            SK: "NOTIFICATION#2026-01-01#notif-1",
+            id: "notif-1",
+          },
+        ],
       });
       mockDynamoSend.mockResolvedValueOnce({});
 
@@ -114,7 +136,11 @@ describe("profile notifications handlers", () => {
 
   describe("markAllNotificationsRead", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await markAllNotificationsRead({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await markAllNotificationsRead(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -133,7 +159,9 @@ describe("profile notifications handlers", () => {
         () => {},
       );
       expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body).message).toContain("1 notifications marked as read");
+      expect(JSON.parse(res.body).message).toContain(
+        "1 notifications marked as read",
+      );
     });
 
     it("should return 500 on database error", async () => {

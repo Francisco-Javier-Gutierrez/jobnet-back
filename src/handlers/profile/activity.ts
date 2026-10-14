@@ -191,8 +191,12 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
 
     // Sort bookmarks by when they were saved (newest first)
     items.sort((a, b) => {
-      const dateA = a.fechaInteraccion ? new Date(a.fechaInteraccion).getTime() : 0;
-      const dateB = b.fechaInteraccion ? new Date(b.fechaInteraccion).getTime() : 0;
+      const dateA = a.fechaInteraccion
+        ? new Date(a.fechaInteraccion).getTime()
+        : 0;
+      const dateB = b.fechaInteraccion
+        ? new Date(b.fechaInteraccion).getTime()
+        : 0;
       return dateB - dateA;
     });
 

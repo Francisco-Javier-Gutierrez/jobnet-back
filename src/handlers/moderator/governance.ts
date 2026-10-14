@@ -1,15 +1,6 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  ScanCommand,
-  GetCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
-import {
-  docClient,
-  tableName,
-  headers,
-  saveAuditLog,
-} from "./common";
+import { ScanCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { docClient, tableName, headers, saveAuditLog } from "./common";
 
 export const getAuditLogs: APIGatewayProxyHandler = async () => {
   try {

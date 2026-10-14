@@ -1,9 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  PutCommand,
-  QueryCommand,
-  GetCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { PutCommand, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 

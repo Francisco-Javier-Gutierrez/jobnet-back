@@ -448,7 +448,10 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             url: "/notifications",
             data: { type: "SUSPENSION_CONFIRMED" },
           }).catch((err) =>
-            console.error("Error sending push for incident unfavorable resolution:", err),
+            console.error(
+              "Error sending push for incident unfavorable resolution:",
+              err,
+            ),
           );
         }
 
@@ -623,7 +626,10 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             title: "Aviso Oficial: Vacante Pausada ⚠️",
             body: `Su vacante "${jobTitle}" ha sido pausada preventivamente por reportes. Ingrese a apelar.`,
             url: "/notifications",
-            data: { type: "SUSPENSION_NOTICE", companyId: vacancy.Item.empresaUuid },
+            data: {
+              type: "SUSPENSION_NOTICE",
+              companyId: vacancy.Item.empresaUuid,
+            },
           }).catch((err) =>
             console.error("Error sending push for paused vacancy:", err),
           );
@@ -709,7 +715,10 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             url: "/notifications",
             data: { type: "SUSPENSION_CANCELED" },
           }).catch((err) =>
-            console.error("Error sending push for incident favorable resolution:", err),
+            console.error(
+              "Error sending push for incident favorable resolution:",
+              err,
+            ),
           );
 
           try {

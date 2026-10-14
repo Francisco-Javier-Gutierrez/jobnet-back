@@ -43,7 +43,13 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import { getJobs, getJobById, createJob, updateJob, deleteJob } from "./vacancies";
+import {
+  getJobs,
+  getJobById,
+  createJob,
+  updateJob,
+  deleteJob,
+} from "./vacancies";
 
 describe("jobs vacancies handlers", () => {
   beforeEach(() => {
@@ -95,7 +101,13 @@ describe("jobs vacancies handlers", () => {
         ],
       }); // Query job-1 interactions
 
-      const res = await getJobs({ queryStringParameters: { q: "Fullstack", page: "1", limit: "10" } } as any, {} as any, () => {});
+      const res = await getJobs(
+        {
+          queryStringParameters: { q: "Fullstack", page: "1", limit: "10" },
+        } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(200);
 
       const body = JSON.parse(res.body);
@@ -110,18 +122,47 @@ describe("jobs vacancies handlers", () => {
       const future = new Date(Date.now() + 100000).toISOString();
       mockDynamoSend.mockResolvedValueOnce({
         Items: [
-          { PK: "USER#comp-temp", estadoCuenta: "SUSPENDIDA_TEMPORAL", fechaFinSuspension: future },
+          {
+            PK: "USER#comp-temp",
+            estadoCuenta: "SUSPENDIDA_TEMPORAL",
+            fechaFinSuspension: future,
+          },
         ],
       }); // Query profiles
       mockDynamoSend.mockResolvedValueOnce({
         Items: [
-          { PK: "VACANCY#job-match", titulo: "Dev", modalidad: "Remoto", company: "A", descripcion: "Desc" },
-          { PK: "VACANCY#job-temp-suspended", titulo: "Dev", modalidad: "Remoto", empresaUuid: "comp-temp" },
-          { PK: "VACANCY#job-modalidad-diff", titulo: "Dev", modalidad: "Presencial", company: "B", descripcion: "Desc" },
-          { PK: "VACANCY#job-q-diff", titulo: "Designer", modalidad: "Remoto", company: "C", descripcion: "Other" },
+          {
+            PK: "VACANCY#job-match",
+            titulo: "Dev",
+            modalidad: "Remoto",
+            company: "A",
+            descripcion: "Desc",
+          },
+          {
+            PK: "VACANCY#job-temp-suspended",
+            titulo: "Dev",
+            modalidad: "Remoto",
+            empresaUuid: "comp-temp",
+          },
+          {
+            PK: "VACANCY#job-modalidad-diff",
+            titulo: "Dev",
+            modalidad: "Presencial",
+            company: "B",
+            descripcion: "Desc",
+          },
+          {
+            PK: "VACANCY#job-q-diff",
+            titulo: "Designer",
+            modalidad: "Remoto",
+            company: "C",
+            descripcion: "Other",
+          },
         ],
       }); // Query vacancies
-      mockDynamoSend.mockRejectedValueOnce(new Error("Enrichment query failed")); // Catch in enrichedItems
+      mockDynamoSend.mockRejectedValueOnce(
+        new Error("Enrichment query failed"),
+      ); // Catch in enrichedItems
 
       const res = await getJobs(
         { queryStringParameters: { q: "Dev", modalidad: "Remoto" } } as any,
@@ -154,13 +195,21 @@ describe("jobs vacancies handlers", () => {
 
   describe("getJobById", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getJobById({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getJobById(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
     it("should return 404 if job does not exist", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Items: [] });
-      const res = await getJobById({ pathParameters: { id: "job-999" } } as any, {} as any, () => {});
+      const res = await getJobById(
+        { pathParameters: { id: "job-999" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(404);
     });
 
@@ -222,7 +271,11 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Job get error"));
-      const res = await getJobById({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await getJobById(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });
@@ -251,21 +304,32 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Create job error"));
-      const res = await createJob({ body: JSON.stringify({}) } as any, {} as any, () => {});
+      const res = await createJob(
+        { body: JSON.stringify({}) } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("updateJob", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await updateJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await updateJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
     it("should return 404 if job does not exist", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
       const res = await updateJob(
-        { pathParameters: { id: "job-999" }, body: JSON.stringify({ title: "New" }) } as any,
+        {
+          pathParameters: { id: "job-999" },
+          body: JSON.stringify({ title: "New" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -324,20 +388,32 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Update job error"));
-      const res = await updateJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await updateJob(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("deleteJob", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await deleteJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await deleteJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
     it("should return 404 if job does not exist", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
-      const res = await deleteJob({ pathParameters: { id: "job-999" } } as any, {} as any, () => {});
+      const res = await deleteJob(
+        { pathParameters: { id: "job-999" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(404);
     });
 
@@ -375,7 +451,11 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Delete job error"));
-      const res = await deleteJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await deleteJob(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });

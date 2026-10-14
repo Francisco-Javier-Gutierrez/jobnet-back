@@ -53,7 +53,11 @@ describe("appeal HTTP handlers", () => {
 
   describe("getAppealMessages", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getAppealMessages({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getAppealMessages(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -97,7 +101,11 @@ describe("appeal HTTP handlers", () => {
 
   describe("sendAppealMessageHttp", () => {
     it("should return 400 if id or companyId or text is missing", async () => {
-      const res1 = await sendAppealMessageHttp({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await sendAppealMessageHttp(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await sendAppealMessageHttp(

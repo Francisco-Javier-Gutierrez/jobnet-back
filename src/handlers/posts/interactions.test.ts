@@ -54,7 +54,11 @@ describe("posts interactions handlers", () => {
 
   describe("toggleLikePost", () => {
     it("should return 400 if id or userUuid is missing", async () => {
-      const res1 = await toggleLikePost({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await toggleLikePost(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await toggleLikePost(
@@ -70,7 +74,10 @@ describe("posts interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
       mockDynamoSend.mockResolvedValueOnce({});
       const res1 = await toggleLikePost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ userUuid: "u-1" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ userUuid: "u-1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -81,7 +88,10 @@ describe("posts interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { PK: "POST#p-1" } });
       mockDynamoSend.mockResolvedValueOnce({});
       const res2 = await toggleLikePost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ userUuid: "u-1" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ userUuid: "u-1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -92,7 +102,10 @@ describe("posts interactions handlers", () => {
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Like post error"));
       const res = await toggleLikePost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ userUuid: "u-1" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ userUuid: "u-1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -102,7 +115,11 @@ describe("posts interactions handlers", () => {
 
   describe("addCommentPost", () => {
     it("should return 400 if id or content is missing", async () => {
-      const res1 = await addCommentPost({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await addCommentPost(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await addCommentPost(
@@ -133,7 +150,10 @@ describe("posts interactions handlers", () => {
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Comment error"));
       const res = await addCommentPost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ content: "Hi" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ content: "Hi" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -143,7 +163,11 @@ describe("posts interactions handlers", () => {
 
   describe("deleteCommentPost", () => {
     it("should return 400 if id or commentId is missing", async () => {
-      const res = await deleteCommentPost({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await deleteCommentPost(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -218,7 +242,11 @@ describe("posts interactions handlers", () => {
 
   describe("toggleBookmarkPost", () => {
     it("should return 400 if id or userUuid is missing", async () => {
-      const res = await toggleBookmarkPost({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await toggleBookmarkPost(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
 
       const res2 = await toggleBookmarkPost(
@@ -234,7 +262,10 @@ describe("posts interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
       mockDynamoSend.mockResolvedValueOnce({});
       const res1 = await toggleBookmarkPost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ userUuid: "u-1" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ userUuid: "u-1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -245,7 +276,10 @@ describe("posts interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { PK: "POST#p-1" } });
       mockDynamoSend.mockResolvedValueOnce({});
       const res2 = await toggleBookmarkPost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ userUuid: "u-1" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ userUuid: "u-1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -256,7 +290,10 @@ describe("posts interactions handlers", () => {
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Bookmark error"));
       const res = await toggleBookmarkPost(
-        { pathParameters: { id: "p-1" }, body: JSON.stringify({ userUuid: "u-1" }) } as any,
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({ userUuid: "u-1" }),
+        } as any,
         {} as any,
         () => {},
       );

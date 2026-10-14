@@ -38,13 +38,21 @@ describe("user profile handlers", () => {
 
   describe("getProfile", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getProfile({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getProfile(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
     it("should return 404 if profile not found", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
-      const res = await getProfile({ pathParameters: { id: "u-999" } } as any, {} as any, () => {});
+      const res = await getProfile(
+        { pathParameters: { id: "u-999" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(404);
     });
 
@@ -58,7 +66,11 @@ describe("user profile handlers", () => {
         },
       });
 
-      const res = await getProfile({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
+      const res = await getProfile(
+        { pathParameters: { id: "u-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.body);
       expect(data.nombre).toBe("Alice");
@@ -67,14 +79,22 @@ describe("user profile handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Profile DB error"));
-      const res = await getProfile({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
+      const res = await getProfile(
+        { pathParameters: { id: "u-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("updateProfile", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await updateProfile({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await updateProfile(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -140,7 +160,11 @@ describe("user profile handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Update error"));
-      const res = await updateProfile({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
+      const res = await updateProfile(
+        { pathParameters: { id: "u-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });

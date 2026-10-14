@@ -62,7 +62,11 @@ describe("applications management handlers", () => {
 
   describe("getJobApplicants", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getJobApplicants({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getJobApplicants(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -78,7 +82,11 @@ describe("applications management handlers", () => {
         ],
       });
 
-      const res = await getJobApplicants({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await getJobApplicants(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.body);
       expect(data).toHaveLength(1);
@@ -87,14 +95,22 @@ describe("applications management handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Applicants DB error"));
-      const res = await getJobApplicants({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await getJobApplicants(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("getMyApplications", () => {
     it("should return 400 if candidateId is missing", async () => {
-      const res = await getMyApplications({ queryStringParameters: {} } as any, {} as any, () => {});
+      const res = await getMyApplications(
+        { queryStringParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -133,7 +149,11 @@ describe("applications management handlers", () => {
 
   describe("updateApplicationStatus", () => {
     it("should return 400 if path parameters or status is invalid", async () => {
-      const res1 = await updateApplicationStatus({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await updateApplicationStatus(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await updateApplicationStatus(
@@ -256,7 +276,9 @@ describe("applications management handlers", () => {
       expect(res1.statusCode).toBe(200);
 
       // 2. CONTRATADO
-      mockDynamoSend.mockResolvedValueOnce({ Item: { status: "SELECCIONADO" } });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { status: "SELECCIONADO" },
+      });
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({
@@ -283,13 +305,20 @@ describe("applications management handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { status: "PENDIENTE" } });
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
-      mockDynamoSend.mockResolvedValueOnce({ Item: { email: "cand@test.com" } });
-      mockDynamoSend.mockResolvedValueOnce({ Item: { titulo: "Dev", company: "Meta" } });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { email: "cand@test.com" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { titulo: "Dev", company: "Meta" },
+      });
       mockDynamoSend.mockResolvedValueOnce({});
       mockSESSend.mockRejectedValueOnce(new Error("SES Error 1"));
 
       await updateApplicationStatus(
-        { pathParameters: { jobId: "job-1", candidateId: "cand-1" }, body: JSON.stringify({ status: "RECHAZADO" }) } as any,
+        {
+          pathParameters: { jobId: "job-1", candidateId: "cand-1" },
+          body: JSON.stringify({ status: "RECHAZADO" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -298,13 +327,20 @@ describe("applications management handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { status: "PENDIENTE" } });
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
-      mockDynamoSend.mockResolvedValueOnce({ Item: { email: "cand@test.com" } });
-      mockDynamoSend.mockResolvedValueOnce({ Item: { titulo: "Dev", company: "Meta" } });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { email: "cand@test.com" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { titulo: "Dev", company: "Meta" },
+      });
       mockDynamoSend.mockResolvedValueOnce({});
       mockSESSend.mockRejectedValueOnce(new Error("SES Error 2"));
 
       await updateApplicationStatus(
-        { pathParameters: { jobId: "job-1", candidateId: "cand-1" }, body: JSON.stringify({ status: "EN_CONTACTO" }) } as any,
+        {
+          pathParameters: { jobId: "job-1", candidateId: "cand-1" },
+          body: JSON.stringify({ status: "EN_CONTACTO" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -313,13 +349,20 @@ describe("applications management handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { status: "PENDIENTE" } });
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
-      mockDynamoSend.mockResolvedValueOnce({ Item: { email: "cand@test.com" } });
-      mockDynamoSend.mockResolvedValueOnce({ Item: { titulo: "Dev", company: "Meta" } });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { email: "cand@test.com" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { titulo: "Dev", company: "Meta" },
+      });
       mockDynamoSend.mockResolvedValueOnce({});
       mockSESSend.mockRejectedValueOnce(new Error("SES Error 3"));
 
       await updateApplicationStatus(
-        { pathParameters: { jobId: "job-1", candidateId: "cand-1" }, body: JSON.stringify({ status: "SELECCIONADO" }) } as any,
+        {
+          pathParameters: { jobId: "job-1", candidateId: "cand-1" },
+          body: JSON.stringify({ status: "SELECCIONADO" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -328,13 +371,20 @@ describe("applications management handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { status: "PENDIENTE" } });
       mockDynamoSend.mockResolvedValueOnce({});
       mockDynamoSend.mockResolvedValueOnce({});
-      mockDynamoSend.mockResolvedValueOnce({ Item: { email: "cand@test.com" } });
-      mockDynamoSend.mockResolvedValueOnce({ Item: { titulo: "Dev", company: "Meta" } });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { email: "cand@test.com" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { titulo: "Dev", company: "Meta" },
+      });
       mockDynamoSend.mockResolvedValueOnce({});
       mockSESSend.mockRejectedValueOnce(new Error("SES Error 4"));
 
       const res = await updateApplicationStatus(
-        { pathParameters: { jobId: "job-1", candidateId: "cand-1" }, body: JSON.stringify({ status: "CONTRATADO" }) } as any,
+        {
+          pathParameters: { jobId: "job-1", candidateId: "cand-1" },
+          body: JSON.stringify({ status: "CONTRATADO" }),
+        } as any,
         {} as any,
         () => {},
       );

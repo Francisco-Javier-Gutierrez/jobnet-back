@@ -297,7 +297,11 @@ describe("catalog handler", () => {
       const resEmpty = await createCatalogItem({} as any, {} as any, () => {});
       expect(resEmpty.statusCode).toBe(400);
 
-      const resEmptyUpdate = await updateCatalogItem({ pathParameters: { id: "1" } } as any, {} as any, () => {});
+      const resEmptyUpdate = await updateCatalogItem(
+        { pathParameters: { id: "1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(resEmptyUpdate.statusCode).toBe(400);
 
       // Custom ID test
@@ -306,7 +310,11 @@ describe("catalog handler", () => {
 
       const resCustom = await createCatalogItem(
         {
-          body: JSON.stringify({ name: "Custom Skill", category: "Habilidad", id: "custom-id-123" }),
+          body: JSON.stringify({
+            name: "Custom Skill",
+            category: "Habilidad",
+            id: "custom-id-123",
+          }),
         } as any,
         {} as any,
         () => {},

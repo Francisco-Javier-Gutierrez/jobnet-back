@@ -252,6 +252,18 @@ functions:
       - httpApi:
           path: /push/vapid-key
           method: get
+  getPushSubscribers:
+    handler: src/handlers/profile.getPushSubscribers
+    events:
+      - httpApi:
+          path: /admin/push-subscribers
+          method: get
+  sendCustomPushNotification:
+    handler: src/handlers/profile.sendCustomPushNotification
+    events:
+      - httpApi:
+          path: /admin/push-broadcast
+          method: post
   getVerificationRequests:
     handler: src/handlers/moderator.getVerificationRequests
     events:
