@@ -1,5 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
 import { s3Client, sesClient, bucketName, headers } from "./common";
@@ -166,3 +166,55 @@ export const sendNotificationEmail: APIGatewayProxyHandler = async (event) => {
     };
   }
 };
+
+export const getViewPresignedUrl: APIGatewayProxyHandler = async (event) => {
+  try {
+    let key = event.queryStringParameters?.key;
+    const urlParam = event.queryStringParameters?.url;
+
+    if (!key && urlParam) {
+      const match = urlParam.match(/(uploads\/[^\?]+)/);
+      if (match) {
+        key = match[1];
+      }
+    }
+
+    if (!key) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "El parámetro 'key' o 'url' es requerido.",
+        }),
+      };
+    }
+
+    if (!key.startsWith("uploads/")) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error: "Acceso no autorizado a la clave solicitada.",
+        }),
+      };
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+    });
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ url, key, expiresIn: 3600 }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+

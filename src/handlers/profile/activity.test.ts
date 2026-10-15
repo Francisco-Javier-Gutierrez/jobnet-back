@@ -200,6 +200,75 @@ describe("profile activity handlers", () => {
       expect(data.data[0].uniqueId).toBe("post-1");
     });
 
+    it("should return 403 Forbidden if another user tries to access private bookmarks", async () => {
+      const res = await getProfileBookmarks(
+        {
+          pathParameters: { id: "u-1" },
+          headers: { "x-user-id": "intruder-999" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(403);
+      const data = JSON.parse(res.body);
+      expect(data.error).toContain("Por directivas de privacidad y protección de datos");
+    });
+
+    it("should allow privileged moderator/admin to inspect bookmarks", async () => {
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+      const res = await getProfileBookmarks(
+        {
+          pathParameters: { id: "u-1" },
+          headers: { "x-user-id": "mod-1", "x-user-role": "MODERATOR" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(200);
+    });
+
+    it("should return bookmarked vacancies when user has saved job vacancies", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "VACANCY#job-1",
+            GSI1SK: "VACANCY#job-1",
+            fechaInteraccion: "2026-01-05T00:00:00.000Z",
+          },
+        ],
+      }); // Query bookmarks
+
+      mockDynamoSend.mockResolvedValueOnce({
+        Responses: {
+          "jobnet-jobs-prod": [
+            {
+              PK: "VACANCY#job-1",
+              SK: "METADATA",
+              titulo: "Senior Cloud Engineer",
+              company: "Tech Corp",
+              salario: 65000,
+              modalidad: "Remoto",
+            },
+          ],
+        },
+      }); // BatchGetCommand vacancies
+
+      const res = await getProfileBookmarks(
+        {
+          pathParameters: { id: "u-1" },
+          queryStringParameters: { type: "jobs" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.data).toHaveLength(1);
+      expect(data.data[0].id).toBe("job-1");
+      expect(data.data[0].title).toBe("Senior Cloud Engineer");
+      expect(data.jobs).toHaveLength(1);
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Bookmarks error"));
       const res = await getProfileBookmarks(

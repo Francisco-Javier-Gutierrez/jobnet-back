@@ -104,7 +104,9 @@ describe("applications management handlers", () => {
           {
             candidateId: "cand-1",
             jobId: "job-1",
-            status: "EN_CONTACTO",
+            status: "RECHAZADO",
+            motivoRechazo: "Perfil cubierto",
+            appliedAt: "2026-01-01T00:00:00.000Z",
           },
         ],
       });
@@ -117,7 +119,8 @@ describe("applications management handlers", () => {
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.body);
       expect(data).toHaveLength(1);
-      expect(data[0].status).toBe("EN_CONTACTO");
+      expect(data[0].status).toBe("RECHAZADO");
+      expect(data[0].motivoRechazo).toBe("Perfil cubierto");
     });
 
     it("should return 500 on database error", async () => {

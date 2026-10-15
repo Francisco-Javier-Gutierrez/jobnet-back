@@ -18,16 +18,32 @@ terraform {
 }
 
 provider "aws" {
-  region = "us-east-1"
+  region  = "us-east-1"
+  profile = "terra-profile"
 
   ignore_tags {
     keys = ["Environment", "ManagedBy", "Project"]
   }
 }
 
+variable "google_client_id" {
+  type        = string
+  default     = ""
+  description = "Client ID de OAuth 2.0 de Google Cloud Console"
+}
+
+variable "google_client_secret" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Client Secret de OAuth 2.0 de Google Cloud Console"
+}
+
 module "infrastructure" {
-  source      = "../../modules/infrastructure"
-  environment = "prod"
+  source               = "../../modules/infrastructure"
+  environment          = "prod"
+  google_client_id     = var.google_client_id
+  google_client_secret = var.google_client_secret
 }
 
 output "user_pool_id" {
@@ -36,6 +52,14 @@ output "user_pool_id" {
 
 output "user_pool_client_id" {
   value = module.infrastructure.user_pool_client_id
+}
+
+output "cognito_domain" {
+  value = module.infrastructure.cognito_domain
+}
+
+output "google_authorized_redirect_uri" {
+  value = module.infrastructure.google_authorized_redirect_uri
 }
 
 output "dynamodb_table_name" {

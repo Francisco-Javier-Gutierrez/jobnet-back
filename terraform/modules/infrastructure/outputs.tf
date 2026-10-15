@@ -21,3 +21,13 @@ output "opensearch_endpoint" {
 output "dynamodb_table_stream_arn" {
   value = aws_dynamodb_table.jobs.stream_arn
 }
+
+output "cognito_domain" {
+  value       = aws_cognito_user_pool_domain.domain.domain
+  description = "Dominio de Cognito para OAuth 2.0 y federación Google"
+}
+
+output "google_authorized_redirect_uri" {
+  value       = "https://${aws_cognito_user_pool_domain.domain.domain}.auth.us-east-1.amazoncognito.com/oauth2/idpresponse"
+  description = "URI de redirección autorizada requerida en la consola de Google Cloud"
+}

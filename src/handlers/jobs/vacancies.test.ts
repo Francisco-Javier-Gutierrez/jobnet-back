@@ -20,6 +20,11 @@ vi.mock("@aws-sdk/client-ses", () => ({
   SendEmailCommand: class {},
 }));
 
+vi.mock("../../utils/webPushService", () => ({
+  sendPushToUser: vi.fn().mockResolvedValue({ sent: 0, failed: 0, removed: 0 }),
+  createUserNotification: vi.fn().mockResolvedValue("test-notif-id"),
+}));
+
 vi.mock("@aws-sdk/lib-dynamodb", () => ({
   DynamoDBDocumentClient: {
     from: () => ({
@@ -43,7 +48,15 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import { getJobs, getJobById, createJob, updateJob, deleteJob } from "./vacancies";
+import {
+  getJobs,
+  getJobById,
+  createJob,
+  updateJob,
+  deleteJob,
+  checkVacancyExpirations,
+  evaluateAndTriggerVacancyExpirations,
+} from "./vacancies";
 
 describe("jobs vacancies handlers", () => {
   beforeEach(() => {
@@ -249,6 +262,46 @@ describe("jobs vacancies handlers", () => {
       expect(data.maxPostulantes).toBe(50);
     });
 
+    it("should create a vacancy with confidential salary, EdoMex municipality and screening questions", async () => {
+      mockDynamoSend.mockResolvedValueOnce({});
+
+      const event = {
+        body: JSON.stringify({
+          title: "Fullstack Developer",
+          company: "Tech Corp",
+          descripcion: "Desarrollo de aplicaciones web y móviles",
+          modalidad: "Presencial",
+          salarioMinimo: 35000,
+          salarioMaximo: 45000,
+          salarioConfidencial: true,
+          municipio: "Metepec",
+          lat: 19.2564,
+          lng: -99.6048,
+          habilidadesRequeridas: ["TypeScript", "Vue.js", "Node.js"],
+          sector: "Tecnología de la Información",
+          preguntasFiltro: [
+            "¿Tienes al menos 2 años de experiencia con Vue 3?",
+            "¿Radicas en Metepec o zonas aledañas del Estado de México?",
+            "¿Disponibilidad para incorporarte en 15 días?",
+            "Pregunta extra que debe truncarse a máximo 3",
+          ],
+        }),
+      } as any;
+
+      const res = await createJob(event, {} as any, () => {});
+      expect(res.statusCode).toBe(201);
+      const data = JSON.parse(res.body);
+      expect(data.titulo).toBe("Fullstack Developer");
+      expect(data.salarioConfidencial).toBe(true);
+      expect(data.isSalaryConfidential).toBe(true);
+      expect(data.municipio).toBe("Metepec");
+      expect(data.lat).toBe(19.2564);
+      expect(data.lng).toBe(-99.6048);
+      expect(data.habilidadesRequeridas).toEqual(["TypeScript", "Vue.js", "Node.js"]);
+      expect(data.preguntasFiltro).toHaveLength(3);
+      expect(data.preguntasFiltro[0]).toBe("¿Tienes al menos 2 años de experiencia con Vue 3?");
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Create job error"));
       const res = await createJob({ body: JSON.stringify({}) } as any, {} as any, () => {});
@@ -322,6 +375,47 @@ describe("jobs vacancies handlers", () => {
       expect(data.titulo).toBe("Updated Title");
     });
 
+    it("should update requirements, modality, salary, screening questions and pause status successfully", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { PK: "VACANCY#job-1", empresaUuid: "owner-1", estado: "Activa" },
+      });
+      mockDynamoSend.mockResolvedValueOnce({
+        Attributes: {
+          titulo: "Lead Architect",
+          modalidad: "Híbrido",
+          salarioMinimo: 50000,
+          salarioMaximo: 70000,
+          salarioConfidencial: true,
+          habilidadesRequeridas: ["TypeScript", "Vue 3", "Node.js"],
+          preguntasFiltro: ["¿Disponibilidad para viajar?", "¿Inglés conversacional C1?"],
+          estado: "PAUSADA",
+        },
+      });
+
+      const event = {
+        pathParameters: { id: "job-1" },
+        headers: { "x-user-id": "owner-1" },
+        body: JSON.stringify({
+          title: "Lead Architect",
+          modalidad: "Híbrido",
+          salarioMinimo: 50000,
+          salarioMaximo: 70000,
+          salarioConfidencial: true,
+          skills: ["TypeScript", "Vue 3", "Node.js"],
+          preguntasFiltro: ["¿Disponibilidad para viajar?", "¿Inglés conversacional C1?"],
+          estado: "PAUSADA",
+        }),
+      } as any;
+
+      const res = await updateJob(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.modalidad).toBe("Híbrido");
+      expect(data.salarioConfidencial).toBe(true);
+      expect(data.estado).toBe("PAUSADA");
+      expect(data.preguntasFiltro).toHaveLength(2);
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Update job error"));
       const res = await updateJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
@@ -377,6 +471,108 @@ describe("jobs vacancies handlers", () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Delete job error"));
       const res = await deleteJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
+    });
+  });
+
+  describe("Alerta de Caducidad (Recordatorio automático a 3 días de vigencia)", () => {
+    it("should trigger system notification reminder 3 days before vacancy closing date", async () => {
+      const { createUserNotification } = await import("../../utils/webPushService");
+
+      // Closing in 2 days (within 3 days window)
+      const closingDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand
+
+      const vacancies = [
+        {
+          id: "vac-expiring-soon",
+          empresaUuid: "company-exp-1",
+          title: "Desarrollador React Senior",
+          estado: "Activa",
+          fechaCierre: closingDate,
+          alertaCaducidadEnviada: false,
+        },
+      ];
+
+      await evaluateAndTriggerVacancyExpirations(vacancies);
+
+      expect(createUserNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "company-exp-1",
+          type: "expiration_reminder",
+          title: "Recordatorio de vigencia de vacante",
+        }),
+      );
+      expect(vacancies[0].alertaCaducidadEnviada).toBe(true);
+    });
+
+    it("should not trigger reminder if vacancy closing is more than 3 days away", async () => {
+      const { createUserNotification } = await import("../../utils/webPushService");
+      vi.clearAllMocks();
+
+      // Closing in 15 days
+      const closingDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+
+      const vacancies = [
+        {
+          id: "vac-safe",
+          empresaUuid: "company-exp-2",
+          title: "Arquitecto Cloud",
+          estado: "Activa",
+          fechaCierre: closingDate,
+          alertaCaducidadEnviada: false,
+        },
+      ];
+
+      await evaluateAndTriggerVacancyExpirations(vacancies);
+
+      expect(createUserNotification).not.toHaveBeenCalled();
+      expect(vacancies[0].alertaCaducidadEnviada).toBe(false);
+    });
+
+    it("should not trigger reminder if alertaCaducidadEnviada is already true", async () => {
+      const { createUserNotification } = await import("../../utils/webPushService");
+      vi.clearAllMocks();
+
+      // Closing in 1 day, but already alerted
+      const closingDate = new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString();
+
+      const vacancies = [
+        {
+          id: "vac-already-alerted",
+          empresaUuid: "company-exp-3",
+          title: "DevOps Engineer",
+          estado: "Activa",
+          fechaCierre: closingDate,
+          alertaCaducidadEnviada: true,
+        },
+      ];
+
+      await evaluateAndTriggerVacancyExpirations(vacancies);
+
+      expect(createUserNotification).not.toHaveBeenCalled();
+    });
+
+    it("should evaluate expirations via checkVacancyExpirations endpoint successfully", async () => {
+      const closingDate = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            PK: "VACANCY#v1",
+            empresaUuid: "company-abc",
+            titulo: "Tech Lead",
+            estado: "Activa",
+            fechaCierre: closingDate,
+            alertaCaducidadEnviada: false,
+          },
+        ],
+      }); // GSI1 QueryCommand
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand
+
+      const res = await checkVacancyExpirations({} as any, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.success).toBe(true);
+      expect(data.evaluatedCount).toBe(1);
     });
   });
 });

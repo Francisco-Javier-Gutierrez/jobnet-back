@@ -10,6 +10,7 @@ import {
   headers,
   saveAuditLog,
 } from "./common";
+import { detectAnomalousConcurrency } from "../../utils/anomalyDetector";
 
 export const getAuditLogs: APIGatewayProxyHandler = async () => {
   try {
@@ -167,3 +168,83 @@ export const toggleUserBlock: APIGatewayProxyHandler = async (event) => {
     };
   }
 };
+
+export const getModeratorConcurrencyAlerts: APIGatewayProxyHandler = async (
+  event,
+) => {
+  try {
+    const userRole = (
+      event.headers["x-user-role"] ||
+      event.headers["X-User-Role"] ||
+      ""
+    ).toUpperCase();
+
+    if (
+      userRole !== "MODERATOR" &&
+      userRole !== "MODERADOR" &&
+      userRole !== "ADMIN"
+    ) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Panel de alertas de concurrencia exclusivo para Moderadores de Comunidad.",
+        }),
+      };
+    }
+
+    // Fetch vacancies
+    let vacanciesItems: any[] = [];
+    try {
+      const vacRes = await docClient.send(
+        new ScanCommand({
+          TableName: tableName,
+          FilterExpression: "begins_with(PK, :prefix)",
+          ExpressionAttributeValues: {
+            ":prefix": "VACANCY#",
+          },
+        }),
+      );
+      vacanciesItems = vacRes.Items || [];
+    } catch (err) {
+      console.warn("Could not query vacancies for concurrency alerts:", err);
+    }
+
+    // Fetch incidents
+    let incidentItems: any[] = [];
+    try {
+      const incRes = await docClient.send(
+        new ScanCommand({
+          TableName: tableName,
+          FilterExpression: "begins_with(PK, :incPrefix)",
+          ExpressionAttributeValues: {
+            ":incPrefix": "INCIDENT#",
+          },
+        }),
+      );
+      incidentItems = incRes.Items || [];
+    } catch (err) {
+      console.warn("Could not query incidents for concurrency alerts:", err);
+    }
+
+    const anomalies = detectAnomalousConcurrency(vacanciesItems, incidentItems);
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        timestamp: new Date().toISOString(),
+        anomalies,
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+

@@ -5,3 +5,4 @@ export * from "./skills";
 export * from "./suspensions";
 export * from "./appeals";
 export * from "./governance";
+export * from "./disputes";

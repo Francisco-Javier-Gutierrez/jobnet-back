@@ -160,12 +160,45 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
     if (!id)
       return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
 
+    // Directiva de privacidad y protección de datos: elementos guardados son estrictamente privados y confidenciales
+    const callerId =
+      (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
+      (event.requestContext as any)?.authorizer?.principalId ||
+      event.headers?.["x-user-id"] ||
+      event.headers?.["X-User-Id"] ||
+      "";
+
+    const callerRole = (
+      (event.requestContext as any)?.authorizer?.role ||
+      (event.requestContext as any)?.authorizer?.jwt?.claims?.["custom:role"] ||
+      event.headers?.["x-user-role"] ||
+      event.headers?.["X-User-Role"] ||
+      ""
+    ).toUpperCase();
+
+    const isPrivileged = callerRole === "ADMIN" || callerRole === "MODERATOR";
+    const isOwner = callerId === id;
+
+    if (callerId && !isOwner && !isPrivileged) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Por directivas de privacidad y protección de datos, los elementos guardados se conservan de forma estrictamente privada y confidencial, siendo accesibles únicamente por el propio usuario.",
+        }),
+      };
+    }
+
     const page = event.queryStringParameters?.page
       ? parseInt(event.queryStringParameters.page, 10)
       : 1;
     const limit = event.queryStringParameters?.limit
       ? parseInt(event.queryStringParameters.limit, 10)
       : 20;
+    const typeFilter = (
+      event.queryStringParameters?.type || "all"
+    ).toLowerCase();
 
     const items: any[] = [];
     let lastEvaluatedKey: any = undefined;
@@ -189,21 +222,40 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
       lastEvaluatedKey = result.LastEvaluatedKey;
     } while (lastEvaluatedKey);
 
+    let filteredItems = items;
+    if (typeFilter === "posts") {
+      filteredItems = items.filter(
+        (i) =>
+          (i.PK && i.PK.startsWith("POST#")) ||
+          (i.GSI1SK && i.GSI1SK.startsWith("POST#")),
+      );
+    } else if (typeFilter === "jobs" || typeFilter === "vacancies") {
+      filteredItems = items.filter(
+        (i) =>
+          (i.PK && i.PK.startsWith("VACANCY#")) ||
+          (i.GSI1SK && i.GSI1SK.startsWith("VACANCY#")),
+      );
+    }
+
     // Sort bookmarks by when they were saved (newest first)
-    items.sort((a, b) => {
-      const dateA = a.fechaInteraccion ? new Date(a.fechaInteraccion).getTime() : 0;
-      const dateB = b.fechaInteraccion ? new Date(b.fechaInteraccion).getTime() : 0;
+    filteredItems.sort((a, b) => {
+      const dateA = a.fechaInteraccion
+        ? new Date(a.fechaInteraccion).getTime()
+        : 0;
+      const dateB = b.fechaInteraccion
+        ? new Date(b.fechaInteraccion).getTime()
+        : 0;
       return dateB - dateA;
     });
 
-    const postIds = Array.from(new Set(items.map((i) => i.PK)));
-    const total = postIds.length;
+    const itemKeys = Array.from(new Set(filteredItems.map((i) => i.PK)));
+    const total = itemKeys.length;
     const totalPages = Math.ceil(total / limit);
 
     // Paginate ONLY the IDs (in-memory, but extremely cheap)
-    const paginatedIds = postIds.slice((page - 1) * limit, page * limit);
+    const paginatedIds = itemKeys.slice((page - 1) * limit, page * limit);
 
-    const paginated: any[] = [];
+    const paginatedRaw: any[] = [];
     if (paginatedIds.length > 0) {
       const keys = paginatedIds.map((pk) => ({ PK: pk, SK: "METADATA" }));
       const result = await docClient.send(
@@ -216,26 +268,56 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
 
       if (result.Responses && result.Responses[tableName]) {
         // Maintain the sorted order from bookmarks
-        const fetchedPosts = result.Responses[tableName];
-        const postMap = new Map(fetchedPosts.map((p: any) => [p.PK, p]));
+        const fetchedItems = result.Responses[tableName];
+        const itemMap = new Map(fetchedItems.map((p: any) => [p.PK, p]));
         for (const pid of paginatedIds) {
-          if (postMap.has(pid)) {
-            paginated.push(postMap.get(pid));
+          if (itemMap.has(pid)) {
+            paginatedRaw.push(itemMap.get(pid));
           }
         }
       }
     }
-    const enrichedPaginated = await enrichPostsWithRelations(
-      paginated,
-      docClient,
-      tableName,
+
+    const rawPosts = paginatedRaw.filter(
+      (i) => i.PK && i.PK.startsWith("POST#"),
     );
+    const rawJobs = paginatedRaw.filter(
+      (i) => i.PK && i.PK.startsWith("VACANCY#"),
+    );
+
+    const enrichedPosts =
+      rawPosts.length > 0
+        ? await enrichPostsWithRelations(rawPosts, docClient, tableName)
+        : [];
+
+    const enrichedJobs = rawJobs.map((jobItem) => {
+      const jId = jobItem.id || jobItem.PK.replace("VACANCY#", "");
+      const enriched = enrichJobItem(jobItem, undefined, new Set([jId]));
+      return enriched;
+    });
+
+    const enrichedMap = new Map<string, any>();
+    for (const p of enrichedPosts) {
+      enrichedMap.set(`POST#${p.uniqueId}`, p);
+    }
+    for (const j of enrichedJobs) {
+      enrichedMap.set(`VACANCY#${j.id}`, j);
+    }
+
+    const enrichedPaginated: any[] = [];
+    for (const raw of paginatedRaw) {
+      if (enrichedMap.has(raw.PK)) {
+        enrichedPaginated.push(enrichedMap.get(raw.PK));
+      }
+    }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         data: enrichedPaginated,
+        posts: enrichedPosts,
+        jobs: enrichedJobs,
         total,
         page,
         totalPages,

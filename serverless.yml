@@ -5,6 +5,7 @@ provider:
   runtime: nodejs20.x
   stage: ${opt:stage, 'prod'}
   region: us-east-1
+  profile: ${opt:aws-profile, env:AWS_PROFILE, 'terra-profile'}
   httpApi:
     cors:
       allowedOrigins:
@@ -117,11 +118,26 @@ functions:
       - httpApi:
           path: /jobs
           method: post
+  checkVacancyExpirations:
+    handler: src/handlers/jobs.checkVacancyExpirations
+    events:
+      - httpApi:
+          path: /jobs/check-expirations
+          method: post
+      - httpApi:
+          path: /jobs/check-expirations
+          method: get
   getUploadPresignedUrl:
     handler: src/handlers/jobs.getUploadPresignedUrl
     events:
       - httpApi:
           path: /upload-url
+          method: get
+  getViewPresignedUrl:
+    handler: src/handlers/jobs.getViewPresignedUrl
+    events:
+      - httpApi:
+          path: /view-url
           method: get
   sendNotificationEmail:
     handler: src/handlers/jobs.sendNotificationEmail
@@ -179,6 +195,12 @@ functions:
     events:
       - httpApi:
           path: /moderator/blocked-domains
+          method: get
+  getModeratorConcurrencyAlerts:
+    handler: src/handlers/moderator.getModeratorConcurrencyAlerts
+    events:
+      - httpApi:
+          path: /moderator/concurrency-alerts
           method: get
   getProfile:
     handler: src/handlers/profile.getProfile
@@ -252,6 +274,12 @@ functions:
       - httpApi:
           path: /push/vapid-key
           method: get
+  notifyCvInteraction:
+    handler: src/handlers/profile.notifyCvInteraction
+    events:
+      - httpApi:
+          path: /profile/{id}/cv-interaction
+          method: post
   getVerificationRequests:
     handler: src/handlers/moderator.getVerificationRequests
     events:
@@ -346,6 +374,24 @@ functions:
     events:
       - httpApi:
           path: /moderator/incidents/{incidentId}/resolve
+          method: post
+  openIncidentAudit:
+    handler: src/handlers/moderator.openIncidentAudit
+    events:
+      - httpApi:
+          path: /moderator/incidents/{incidentId}/open-audit
+          method: post
+  getIncidentAuditChat:
+    handler: src/handlers/moderator.getIncidentAuditChat
+    events:
+      - httpApi:
+          path: /moderator/incidents/{incidentId}/audit-chat
+          method: get
+  submitIncidentAuditDictum:
+    handler: src/handlers/moderator.submitIncidentAuditDictum
+    events:
+      - httpApi:
+          path: /moderator/incidents/{incidentId}/audit-dictum
           method: post
   getSuggestedSkills:
     handler: src/handlers/moderator.getSuggestedSkills
@@ -497,3 +543,9 @@ functions:
       - httpApi:
           path: /jobs/{id}/share
           method: post
+  getAdminAnalytics:
+    handler: src/handlers/admin/index.getAdminAnalytics
+    events:
+      - httpApi:
+          path: /admin/analytics
+          method: get

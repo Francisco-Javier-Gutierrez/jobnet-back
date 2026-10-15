@@ -25,6 +25,9 @@ vi.mock("@aws-sdk/client-s3", () => ({
   PutObjectCommand: class {
     constructor(public params: any) {}
   },
+  GetObjectCommand: class {
+    constructor(public params: any) {}
+  },
 }));
 
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
@@ -40,7 +43,11 @@ vi.mock("@aws-sdk/client-ses", () => ({
   },
 }));
 
-import { getUploadPresignedUrl, sendNotificationEmail } from "./uploads";
+import {
+  getUploadPresignedUrl,
+  getViewPresignedUrl,
+  sendNotificationEmail,
+} from "./uploads";
 
 describe("jobs uploads & emails handlers", () => {
   beforeEach(() => {
@@ -162,4 +169,55 @@ describe("jobs uploads & emails handlers", () => {
       expect(JSON.parse(res.body).error).toBe("SES service error");
     });
   });
+
+  describe("getViewPresignedUrl", () => {
+    it("should return 400 if key and url are missing", async () => {
+      const event = { queryStringParameters: {} } as any;
+      const res = await getViewPresignedUrl(event, {} as any, () => {});
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("El parámetro 'key' o 'url' es requerido");
+    });
+
+    it("should return 403 if key does not start with uploads/", async () => {
+      const event = { queryStringParameters: { key: "secrets/config.json" } } as any;
+      const res = await getViewPresignedUrl(event, {} as any, () => {});
+      expect(res.statusCode).toBe(403);
+      expect(JSON.parse(res.body).error).toContain("Acceso no autorizado");
+    });
+
+    it("should return 200 with presigned GET url and 1 hour expiration", async () => {
+      const event = {
+        queryStringParameters: { key: "uploads/documents/cand-1/cert.pdf" },
+      } as any;
+      const res = await getViewPresignedUrl(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.url).toBe("https://s3.amazonaws.com/presigned-url");
+      expect(data.key).toBe("uploads/documents/cand-1/cert.pdf");
+      expect(data.expiresIn).toBe(3600);
+    });
+
+    it("should extract key from full url parameter and return 200", async () => {
+      const event = {
+        queryStringParameters: {
+          url: "https://jobnet-uploads-prod.s3.us-east-1.amazonaws.com/uploads/resumes/cand-1/cv.pdf",
+        },
+      } as any;
+      const res = await getViewPresignedUrl(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.key).toBe("uploads/resumes/cand-1/cv.pdf");
+    });
+
+    it("should return 500 on S3 signing error", async () => {
+      mockGetSignedUrl.mockRejectedValueOnce(new Error("S3 GetObject failed"));
+      const event = {
+        queryStringParameters: { key: "uploads/documents/cand-1/cert.pdf" },
+      } as any;
+      const res = await getViewPresignedUrl(event, {} as any, () => {});
+      expect(res.statusCode).toBe(500);
+      expect(JSON.parse(res.body).error).toBe("S3 GetObject failed");
+    });
+  });
 });
+

@@ -20,8 +20,18 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
       send: mockDynamoSend,
     }),
   },
-  PutCommand: class {},
-  GetCommand: class {},
+  PutCommand: class {
+    input: any;
+    constructor(input: any) {
+      this.input = input;
+    }
+  },
+  GetCommand: class {
+    input: any;
+    constructor(input: any) {
+      this.input = input;
+    }
+  },
 }));
 
 import { handler } from "./postConfirmation";
@@ -79,11 +89,41 @@ describe("postConfirmation handler", () => {
     expect(mockDynamoSend).toHaveBeenCalled();
   });
 
-  it("should process ORGANIZACION user correctly", async () => {
-    const event = createEvent("ORGANIZACION", "Tech Corp");
+  it("should auto-verify ORGANIZACION when email has a private corporate domain", async () => {
+    const event = createEvent("ORGANIZACION", "Tech Solutions Corp");
+    event.request.userAttributes.email = "recruiter@techsolutions.mx";
+
     const result = await handler(event, {} as never, () => {});
     expect(result).toBeDefined();
-    expect(mockDynamoSend).toHaveBeenCalled();
+
+    const putCall = mockDynamoSend.mock.calls.find(
+      (c) => c[0]?.constructor?.name === "PutCommand" || c[0]?.input?.Item?.PK?.startsWith("USER#"),
+    );
+    expect(putCall).toBeDefined();
+    const savedItem = putCall[0].input.Item;
+    expect(savedItem.tipoUsuario).toBe("ORGANIZACION");
+    expect(savedItem.organizacionVerificada).toBe(true);
+    expect(savedItem.estatusVerificacion).toBe("VERIFICADA");
+    expect(savedItem.metodoVerificacion).toBe("AUTOMATICO_DOMINIO_CORPORATIVO");
+    expect(savedItem.dominioCorporativo).toBe("techsolutions.mx");
+  });
+
+  it("should set ORGANIZACION as unverified/pending when email has a public domain (e.g. gmail.com)", async () => {
+    const event = createEvent("ORGANIZACION", "Consultoría Local");
+    event.request.userAttributes.email = "reclutador.pyme@gmail.com";
+
+    const result = await handler(event, {} as never, () => {});
+    expect(result).toBeDefined();
+
+    const putCall = mockDynamoSend.mock.calls.find(
+      (c) => c[0]?.constructor?.name === "PutCommand" || c[0]?.input?.Item?.PK?.startsWith("USER#"),
+    );
+    expect(putCall).toBeDefined();
+    const savedItem = putCall[0].input.Item;
+    expect(savedItem.tipoUsuario).toBe("ORGANIZACION");
+    expect(savedItem.organizacionVerificada).toBe(false);
+    expect(savedItem.estatusVerificacion).toBe("PENDIENTE");
+    expect(savedItem.metodoVerificacion).toBe("MANUAL_PENDIENTE");
   });
 
   it("should block ORGANIZACION signup if corporate domain is suspended (RF-74)", async () => {
@@ -230,6 +270,45 @@ describe("postConfirmation handler", () => {
 
     const res = await handler(event, {} as never, () => {});
     expect(res).toBeDefined();
+  });
+
+  it("should process moderator_pending aspirant with neutral pending state and not CANDIDATO", async () => {
+    const event = createEvent("moderator_pending", "Aspirante Mod", "moderator_pending");
+    event.request.clientMetadata = {
+      tipoUsuario: "moderator_pending",
+      solicitudRol: "MODERATOR",
+      nombre: "Aspirante Mod",
+    } as any;
+
+    const res = await handler(event, {} as never, () => {});
+    expect(res).toBeDefined();
+    expect(mockDynamoSend).toHaveBeenCalled();
+  });
+
+  it("should automatically process Google federated sign-in as active CANDIDATO and sync name and email", async () => {
+    const event = createEvent("", "Google Candidate");
+    event.userName = "Google_10987654321";
+    event.request.userAttributes = {
+      email: "google.candidato@gmail.com",
+      name: "Juan Pérez Google",
+      sub: "google-sub-12345",
+      identities: '[{"userId":"10987654321","providerName":"Google","providerType":"Google"}]',
+    };
+    event.request.clientMetadata = undefined;
+
+    const res = await handler(event, {} as never, () => {});
+    expect(res).toBeDefined();
+
+    const putCall = mockDynamoSend.mock.calls.find(
+      (c) => c[0]?.constructor?.name === "PutCommand" || c[0]?.input?.Item?.PK === "USER#google-sub-12345",
+    );
+    expect(putCall).toBeDefined();
+    const savedItem = putCall[0].input.Item;
+    expect(savedItem.tipoUsuario).toBe("CANDIDATO");
+    expect(savedItem.estadoCuenta).toBe("ACTIVO");
+    expect(savedItem.email).toBe("google.candidato@gmail.com");
+    expect(savedItem.nombre).toBe("Juan Pérez Google");
+    expect(savedItem.origenRegistro).toBe("GOOGLE_OAUTH");
   });
 
   it("should initialize with local endpoint when IS_OFFLINE is true", async () => {
