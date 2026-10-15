@@ -137,7 +137,10 @@ describe("moderator governance handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand stale connection
 
       await broadcastAppealResolved("comp-1", "RESUELTO", {
-        requestContext: { domainName: "lzvcx59zaa.execute-api.com", stage: "prod" },
+        requestContext: {
+          domainName: "lzvcx59zaa.execute-api.com",
+          stage: "prod",
+        },
       });
 
       expect(mockApiGwSend).toHaveBeenCalledTimes(3);
@@ -145,9 +148,14 @@ describe("moderator governance handlers", () => {
 
     it("should resolve endpoint using domainName if it includes wsApiId in moderator common", () => {
       const endpoint = getEndpoint({
-        requestContext: { domainName: "lzvcx59zaa.execute-api.us-east-1.amazonaws.com", stage: "dev" },
+        requestContext: {
+          domainName: "lzvcx59zaa.execute-api.us-east-1.amazonaws.com",
+          stage: "dev",
+        },
       });
-      expect(endpoint).toBe("https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev");
+      expect(endpoint).toBe(
+        "https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev",
+      );
     });
 
     it("should return localhost endpoint when IS_OFFLINE is true in moderator common", async () => {
@@ -234,7 +242,11 @@ describe("moderator governance handlers", () => {
 
   describe("toggleUserBlock", () => {
     it("should return 400 if userId is missing", async () => {
-      const res = await toggleUserBlock({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await toggleUserBlock(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 

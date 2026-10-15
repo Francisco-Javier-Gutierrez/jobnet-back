@@ -70,39 +70,40 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
           },
         }),
       );
-        liked = true;
+      liked = true;
 
-        // Notificar al autor del post cuando recibe like
-        try {
-          const postRes = await docClient.send(
-            new GetCommand({
-              TableName: tableName,
-              Key: { PK: `POST#${postId}`, SK: "METADATA" },
-            }),
+      // Notificar al autor del post cuando recibe like
+      try {
+        const postRes = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `POST#${postId}`, SK: "METADATA" },
+          }),
+        );
+        const postAuthorUuid = postRes.Item?.authorUuid;
+        if (postAuthorUuid && postAuthorUuid !== userUuid) {
+          createUserNotification({
+            userId: postAuthorUuid,
+            title: "Le ha gustado tu publicación ❤️",
+            message:
+              "A un usuario de JobNet le gustó tu publicación en el feed.",
+            type: "like",
+            url: "/feed",
+            extra: { postId },
+          }).catch((err) =>
+            console.error("Error creating post like notification:", err),
           );
-          const postAuthorUuid = postRes.Item?.authorUuid;
-          if (postAuthorUuid && postAuthorUuid !== userUuid) {
-            createUserNotification({
-              userId: postAuthorUuid,
-              title: "Le ha gustado tu publicación ❤️",
-              message: "A un usuario de JobNet le gustó tu publicación en el feed.",
-              type: "like",
-              url: "/feed",
-              extra: { postId },
-            }).catch((err) =>
-              console.error("Error creating post like notification:", err),
-            );
-          }
-        } catch (e) {
-          console.warn("Could not notify post author on like:", e);
         }
+      } catch (e) {
+        console.warn("Could not notify post author on like:", e);
       }
+    }
 
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ liked, postId, userUuid }),
-      };
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ liked, postId, userUuid }),
+    };
   } catch (error: unknown) {
     return {
       statusCode: 500,

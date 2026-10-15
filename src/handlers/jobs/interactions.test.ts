@@ -65,7 +65,11 @@ describe("jobs interactions handlers", () => {
 
   describe("toggleLikeJob", () => {
     it("should return 400 if id or userUuid is missing", async () => {
-      const res1 = await toggleLikeJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await toggleLikeJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await toggleLikeJob(
@@ -81,7 +85,10 @@ describe("jobs interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // PutCommand
 
       const res = await toggleLikeJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ userUuid: "u1" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ userUuid: "u1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -94,7 +101,10 @@ describe("jobs interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand
 
       const res = await toggleLikeJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ userUuid: "u1" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ userUuid: "u1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -105,7 +115,10 @@ describe("jobs interactions handlers", () => {
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Like DB error"));
       const res = await toggleLikeJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ userUuid: "u1" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ userUuid: "u1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -115,7 +128,11 @@ describe("jobs interactions handlers", () => {
 
   describe("addCommentJob", () => {
     it("should return 400 if id or content is missing", async () => {
-      const res1 = await addCommentJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await addCommentJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await addCommentJob(
@@ -146,7 +163,10 @@ describe("jobs interactions handlers", () => {
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Comment error"));
       const res = await addCommentJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ content: "Hi" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ content: "Hi" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -156,7 +176,11 @@ describe("jobs interactions handlers", () => {
 
   describe("deleteCommentJob", () => {
     it("should return 400 if id or commentId is missing", async () => {
-      const res = await deleteCommentJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await deleteCommentJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -219,7 +243,9 @@ describe("jobs interactions handlers", () => {
     });
 
     it("should return 500 on database error", async () => {
-      mockDynamoSend.mockRejectedValueOnce(new Error("Delete comment DB error"));
+      mockDynamoSend.mockRejectedValueOnce(
+        new Error("Delete comment DB error"),
+      );
       const res = await deleteCommentJob(
         { pathParameters: { id: "job-1", commentId: "c-1" } } as any,
         {} as any,
@@ -231,7 +257,11 @@ describe("jobs interactions handlers", () => {
 
   describe("toggleBookmarkJob", () => {
     it("should return 400 if id or userUuid is missing", async () => {
-      const res = await toggleBookmarkJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await toggleBookmarkJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
 
       const res2 = await toggleBookmarkJob(
@@ -247,7 +277,10 @@ describe("jobs interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
       mockDynamoSend.mockResolvedValueOnce({});
       const res1 = await toggleBookmarkJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ userUuid: "u1" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ userUuid: "u1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -258,7 +291,10 @@ describe("jobs interactions handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: { PK: "VACANCY#job-1" } });
       mockDynamoSend.mockResolvedValueOnce({});
       const res2 = await toggleBookmarkJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ userUuid: "u1" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ userUuid: "u1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -269,7 +305,10 @@ describe("jobs interactions handlers", () => {
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Bookmark DB error"));
       const res = await toggleBookmarkJob(
-        { pathParameters: { id: "job-1" }, body: JSON.stringify({ userUuid: "u1" }) } as any,
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({ userUuid: "u1" }),
+        } as any,
         {} as any,
         () => {},
       );
@@ -279,20 +318,32 @@ describe("jobs interactions handlers", () => {
 
   describe("shareJob", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await shareJob({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await shareJob(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
     it("should increment sharesCount and return updated count", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Attributes: { sharesCount: 5 } });
-      const res = await shareJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await shareJob(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body).sharesCount).toBe(5);
     });
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Share DB error"));
-      const res = await shareJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
+      const res = await shareJob(
+        { pathParameters: { id: "job-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(500);
     });
   });

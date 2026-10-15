@@ -42,7 +42,10 @@ describe("ws connection handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({});
 
       const event = {
-        requestContext: { connectionId: "conn-1", authorizer: { principalId: "u-1" } },
+        requestContext: {
+          connectionId: "conn-1",
+          authorizer: { principalId: "u-1" },
+        },
       } as any;
 
       const res = await connect(event, {} as any, () => {});
@@ -108,7 +111,11 @@ describe("ws connection handlers", () => {
 
   describe("defaultRoute", () => {
     it("should handle default route", async () => {
-      const res = await defaultRoute({ requestContext: { connectionId: "conn-1" } } as any, {} as any, () => {});
+      const res = await defaultRoute(
+        { requestContext: { connectionId: "conn-1" } } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(200);
       expect(res.body).toBe("Default route");
     });

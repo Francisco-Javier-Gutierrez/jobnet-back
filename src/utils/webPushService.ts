@@ -1,6 +1,12 @@
 import webpush from "web-push";
 import crypto from "crypto";
-import { QueryCommand, PutCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  QueryCommand,
+  PutCommand,
+  DeleteCommand,
+  ScanCommand,
+  GetCommand,
+} from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName } from "../handlers/profile/common";
 
 export interface PushSubscriptionKeys {
@@ -18,6 +24,7 @@ export interface PushNotificationPayload {
   body: string;
   icon?: string;
   badge?: string;
+  image?: string;
   url?: string;
   tag?: string;
   data?: Record<string, any>;
@@ -53,8 +60,14 @@ export async function savePushSubscription(
   subscription: PushSubscriptionData,
   userAgent: string = "unknown",
 ): Promise<void> {
-  if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
-    throw new Error("Invalid push subscription format: endpoint and keys are required.");
+  if (
+    !subscription?.endpoint ||
+    !subscription?.keys?.p256dh ||
+    !subscription?.keys?.auth
+  ) {
+    throw new Error(
+      "Invalid push subscription format: endpoint and keys are required.",
+    );
   }
 
   const endpointHash = hashEndpoint(subscription.endpoint);
@@ -130,6 +143,7 @@ export async function sendPushToUser(
       body: payload.body || "Tienes una nueva notificación",
       icon: payload.icon || "/logotipo.svg",
       badge: payload.badge || "/logotipo.svg",
+      image: payload.image || undefined,
       url: payload.url || "/notifications",
       tag: payload.tag || "jobnet-notification",
       data: payload.data || {},
@@ -164,7 +178,10 @@ export async function sendPushToUser(
               console.error("Error removing expired subscription:", cleanupErr);
             }
           } else {
-            console.error(`Failed to send web push to ${userId}:`, error.message || error);
+            console.error(
+              `Failed to send web push to ${userId}:`,
+              error.message || error,
+            );
           }
         }
       }),
@@ -223,7 +240,10 @@ export async function createUserNotification({
       }),
     );
   } catch (dbErr) {
-    console.error(`Error saving notification to DynamoDB for ${userId}:`, dbErr);
+    console.error(
+      `Error saving notification to DynamoDB for ${userId}:`,
+      dbErr,
+    );
   }
 
   try {
@@ -231,6 +251,10 @@ export async function createUserNotification({
       title,
       body: truncatedMessage,
       url,
+      icon: extra.icon || "/logotipo.svg",
+      badge: extra.badge || "/logotipo.svg",
+      image: extra.image || undefined,
+      tag: extra.tag || "jobnet-notification",
       data: { type, notifId, ...extra },
     });
   } catch (pushErr) {
@@ -238,4 +262,171 @@ export async function createUserNotification({
   }
 
   return notifId;
+}
+
+export interface DeviceInfo {
+  endpointHash: string;
+  endpoint: string;
+  userAgent: string;
+  browser: string;
+  os: string;
+  deviceLabel: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PushSubscriberUser {
+  userId: string;
+  nombre: string;
+  email: string;
+  tipoUsuario: string;
+  estadoCuenta: string;
+  fotoPerfil: string;
+  devices: DeviceInfo[];
+  deviceCount: number;
+  lastActive: string;
+}
+
+export function parseUserAgent(ua: string = ""): {
+  browser: string;
+  os: string;
+  deviceLabel: string;
+} {
+  let browser = "Navegador Web";
+  let os = "Dispositivo";
+
+  if (/edg/i.test(ua)) {
+    browser = "Edge";
+  } else if (/opr|opera/i.test(ua)) {
+    browser = "Opera";
+  } else if (/chrome|crios/i.test(ua)) {
+    browser = "Chrome";
+  } else if (/firefox|fxios/i.test(ua)) {
+    browser = "Firefox";
+  } else if (/safari/i.test(ua) && !/chrome/i.test(ua)) {
+    browser = "Safari";
+  }
+
+  if (/windows nt 10/i.test(ua)) {
+    os = "Windows 10/11";
+  } else if (/windows/i.test(ua)) {
+    os = "Windows";
+  } else if (/android/i.test(ua)) {
+    os = "Android";
+  } else if (/iphone|ipad|ipod/i.test(ua)) {
+    os = "iOS";
+  } else if (/mac os x/i.test(ua)) {
+    os = "macOS";
+  } else if (/linux/i.test(ua)) {
+    os = "Linux";
+  }
+
+  return {
+    browser,
+    os,
+    deviceLabel: `${browser} en ${os}`,
+  };
+}
+
+/**
+ * Consulta todos los usuarios que cuentan con suscripciones Web Push activas.
+ */
+export async function getAllPushSubscribers(): Promise<PushSubscriberUser[]> {
+  try {
+    const scanResult = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        FilterExpression: "begins_with(SK, :skPrefix)",
+        ExpressionAttributeValues: {
+          ":skPrefix": "PUSH_SUB#",
+        },
+      }),
+    );
+
+    const items = scanResult.Items || [];
+    if (items.length === 0) return [];
+
+    const userMap = new Map<string, PushSubscriberUser>();
+
+    for (const item of items) {
+      const userId = (item.PK || "").replace("USER#", "");
+      if (!userId) continue;
+
+      const device: DeviceInfo = {
+        endpointHash: (item.SK || "").replace("PUSH_SUB#", ""),
+        endpoint: item.endpoint || "",
+        userAgent: item.userAgent || "unknown",
+        ...parseUserAgent(item.userAgent),
+        createdAt: item.createdAt || new Date().toISOString(),
+        updatedAt: item.updatedAt || item.createdAt || new Date().toISOString(),
+      };
+
+      if (!userMap.has(userId)) {
+        userMap.set(userId, {
+          userId,
+          nombre: "Usuario JobNet",
+          email: "",
+          tipoUsuario: "CANDIDATO",
+          estadoCuenta: "ACTIVO",
+          fotoPerfil: "",
+          devices: [device],
+          deviceCount: 1,
+          lastActive: device.updatedAt,
+        });
+      } else {
+        const u = userMap.get(userId)!;
+        u.devices.push(device);
+        u.deviceCount = u.devices.length;
+        if (
+          new Date(device.updatedAt).getTime() >
+          new Date(u.lastActive).getTime()
+        ) {
+          u.lastActive = device.updatedAt;
+        }
+      }
+    }
+
+    const userList = Array.from(userMap.values());
+
+    // Obtener los perfiles correspondientes para enriquecer datos de cada usuario
+    await Promise.all(
+      userList.map(async (u) => {
+        try {
+          const profRes = await docClient.send(
+            new GetCommand({
+              TableName: tableName,
+              Key: {
+                PK: `USER#${u.userId}`,
+                SK: "PROFILE",
+              },
+            }),
+          );
+          if (profRes.Item) {
+            const p = profRes.Item;
+            u.nombre = p.nombre || p.name || p.nombreComercial || u.nombre;
+            u.email = p.email || "";
+            u.tipoUsuario = p.tipoUsuario || p.role || "CANDIDATO";
+            u.estadoCuenta = p.estadoCuenta || p.status || "ACTIVO";
+            u.fotoPerfil = p.fotoPerfil || p.avatarUrl || "";
+          }
+        } catch (err) {
+          console.warn(
+            `Error al consultar perfil de usuario ${u.userId}:`,
+            err,
+          );
+        }
+      }),
+    );
+
+    // Ordenar por última actividad descendente
+    userList.sort(
+      (a, b) =>
+        new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime(),
+    );
+
+    return userList;
+  } catch (error) {
+    console.error("Error al obtener suscriptores push:", error);
+    return [];
+  }
 }

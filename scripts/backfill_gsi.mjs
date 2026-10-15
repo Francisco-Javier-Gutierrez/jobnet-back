@@ -14,7 +14,9 @@ const docClient = DynamoDBDocumentClient.from(client);
 const TABLE_NAME = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 async function run() {
-  console.log(`Starting backfill on table: ${TABLE_NAME} using profile: terra-profile`);
+  console.log(
+    `Starting backfill on table: ${TABLE_NAME} using profile: terra-profile`,
+  );
   let lastEvaluatedKey = undefined;
   let itemsToUpdate = [];
   let updatedCount = 0;
@@ -100,7 +102,9 @@ async function run() {
     updatedCount += itemsToUpdate.length;
   }
 
-  console.log(`Finished! Total scanned PROFILE/CATALOG items: ${scannedCount}. Total updated items: ${updatedCount}`);
+  console.log(
+    `Finished! Total scanned PROFILE/CATALOG items: ${scannedCount}. Total updated items: ${updatedCount}`,
+  );
 }
 
 run().catch((err) => {

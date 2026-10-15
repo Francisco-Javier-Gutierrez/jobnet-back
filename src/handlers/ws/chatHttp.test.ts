@@ -53,7 +53,11 @@ describe("chat HTTP handlers", () => {
 
   describe("getChatMessages", () => {
     it("should return 400 if parameters are missing", async () => {
-      const res = await getChatMessages({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getChatMessages(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -92,7 +96,11 @@ describe("chat HTTP handlers", () => {
 
   describe("sendChatMessageHttp", () => {
     it("should return 400 if path or body parameters are missing", async () => {
-      const res1 = await sendChatMessageHttp({ pathParameters: {} } as any, {} as any, () => {});
+      const res1 = await sendChatMessageHttp(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res1.statusCode).toBe(400);
 
       const res2 = await sendChatMessageHttp(

@@ -82,7 +82,11 @@ describe("moderator suspensions handlers", () => {
 
   describe("initiateSuspension", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await initiateSuspension({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await initiateSuspension(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -141,7 +145,11 @@ describe("moderator suspensions handlers", () => {
 
   describe("cancelSuspension", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await cancelSuspension({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await cancelSuspension(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -207,7 +215,11 @@ describe("moderator suspensions handlers", () => {
 
   describe("confirmSuspension", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await confirmSuspension({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await confirmSuspension(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
@@ -270,7 +282,11 @@ describe("moderator suspensions handlers", () => {
 
   describe("getSuspensionStatus", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await getSuspensionStatus({ pathParameters: {} } as any, {} as any, () => {});
+      const res = await getSuspensionStatus(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
       expect(res.statusCode).toBe(400);
     });
 
