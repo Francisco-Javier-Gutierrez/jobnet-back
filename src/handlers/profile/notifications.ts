@@ -324,6 +324,9 @@ export const notifyCvInteraction: APIGatewayProxyHandler = async (event) => {
         recruiterName,
         vacancyTitle,
         timestamp: new Date().toISOString(),
+      },
+    });
+
     return {
       statusCode: 200,
       headers,
