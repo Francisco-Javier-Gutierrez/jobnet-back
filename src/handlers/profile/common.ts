@@ -22,6 +22,8 @@ export const headers = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Credentials": true,
   "Content-Type": "application/json",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization,x-user-id,x-user-role,X-User-Id,X-User-Role",
+  "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
 };
 
 export async function enrichPostsWithRelations(

@@ -18,6 +18,10 @@ provider:
         - X-Api-Key
         - X-Amz-Security-Token
         - X-Amz-User-Agent
+        - x-user-id
+        - x-user-role
+        - X-User-Id
+        - X-User-Role
       allowedMethods:
         - GET
         - POST
@@ -561,3 +565,28 @@ functions:
       - httpApi:
           path: /admin/analytics
           method: get
+  getCvTemplates:
+    handler: src/handlers/cvTemplates.getCvTemplates
+    events:
+      - httpApi:
+          path: /cv-templates
+          method: get
+  createCvTemplate:
+    handler: src/handlers/cvTemplates.createCvTemplate
+    events:
+      - httpApi:
+          path: /cv-templates
+          method: post
+  deleteCvTemplate:
+    handler: src/handlers/cvTemplates.deleteCvTemplate
+    events:
+      - httpApi:
+          path: /cv-templates/{id}
+          method: delete
+  useCvTemplate:
+    handler: src/handlers/cvTemplates.useCvTemplate
+    events:
+      - httpApi:
+          path: /cv-templates/{id}/use
+          method: post
+
