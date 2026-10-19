@@ -38,6 +38,7 @@ provider:
     VAPID_PUBLIC_KEY: ${env:VAPID_PUBLIC_KEY, 'BOIrktuQCHHiOWcKICA7YEwdKJf8WNYCmBS_PI338wnaB9VqXPQfCRwTN5NLYokujXBp5pdD83av6DACG2rAYok'}
     VAPID_PRIVATE_KEY: ${env:VAPID_PRIVATE_KEY, 'oJXO_P5wuj45JaC8taPC1E3pPR8Hu1zi_kAiv5yAaNg'}
     VAPID_SUBJECT: ${env:VAPID_SUBJECT, 'mailto:contacto@franciscojgh.com'}
+    GEMINI_API_KEY: ${env:GEMINI_API_KEY, ''}
   iam:
     role:
       statements:
