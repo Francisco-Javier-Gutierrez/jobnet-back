@@ -349,6 +349,31 @@ describe("jobs vacancies handlers", () => {
       expect(data.preguntasFiltro[0]).toBe("¿Tienes al menos 2 años de experiencia con Vue 3?");
     });
 
+    it("should reject vacancy creation if title or description contains toxic words or slurs (Pre-AI Filter)", async () => {
+      const eventBadTitle = {
+        body: JSON.stringify({
+          title: "Se busca programador pendejo",
+          company: "Acme",
+          descripcion: "Desarrollo web",
+        }),
+      };
+      const res1 = await createJob(eventBadTitle as any, {} as any, () => {});
+      expect(res1.statusCode).toBe(400);
+      expect(JSON.parse(res1.body).details).toContain("pendejo");
+
+      const eventBadDesc = {
+        body: JSON.stringify({
+          title: "Arquitecto Cloud",
+          company: "Acme",
+          descripcion: "Oportunidad unica, vete alv si no cumples el perfil",
+        }),
+      };
+      const res2 = await createJob(eventBadDesc as any, {} as any, () => {});
+      expect(res2.statusCode).toBe(400);
+      expect(JSON.parse(res2.body).details).toContain("alv");
+      expect(mockDynamoSend).not.toHaveBeenCalled();
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Create job error"));
       const res = await createJob(

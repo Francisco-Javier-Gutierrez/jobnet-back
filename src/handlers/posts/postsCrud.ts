@@ -7,6 +7,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { docClient, tableName, headers } from "./common";
+import { evaluatePreAi } from "../../utils/preAiFilter";
 
 export const getPosts: APIGatewayProxyHandler = async (event) => {
   try {
@@ -184,6 +185,22 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
           error: "Debe ingresar contenido, imagen o documento PDF.",
         }),
       };
+    }
+
+    if (content) {
+      const filterResult = evaluatePreAi(content);
+      if (!filterResult.isClean) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              filterResult.explanation ||
+              "El contenido infringe las normas de convivencia de JobNet.",
+            details: filterResult.matches,
+          }),
+        };
+      }
     }
 
     const postUuid = `post-${randomUUID()}`;

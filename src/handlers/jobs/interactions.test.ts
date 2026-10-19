@@ -160,6 +160,25 @@ describe("jobs interactions handlers", () => {
       expect(data.text).toBe("Great salary");
     });
 
+    it("should reject comment on vacancy if content contains toxic words or slurs", async () => {
+      const res = await addCommentJob(
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({
+            author: "Troll",
+            content: "Que porqueria de trabajo chsm",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.error).toContain("Contenido bloqueado por el filtro de seguridad");
+      expect(data.details).toContain("chsm");
+      expect(mockDynamoSend).not.toHaveBeenCalled();
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Comment error"));
       const res = await addCommentJob(

@@ -208,6 +208,25 @@ describe("posts CRUD handlers", () => {
       expect(data.content).toBe("Hello everyone!");
     });
 
+    it("should reject post if content contains toxic slang or insults (Pre-AI Filter)", async () => {
+      const res = await createPost(
+        {
+          body: JSON.stringify({
+            author: "Troll",
+            content: "Callate sybau y vete alv",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.error).toContain("Contenido bloqueado por el filtro de seguridad");
+      expect(data.details).toContain("sybau");
+      expect(data.details).toContain("alv");
+      expect(mockDynamoSend).not.toHaveBeenCalled();
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Create post error"));
       const res = await createPost(

@@ -8,6 +8,7 @@ import {
 import { randomUUID } from "crypto";
 import { docClient, tableName, enrichJobItem } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
+import { evaluatePreAi } from "../../utils/preAiFilter";
 
 export const getJobs: APIGatewayProxyHandler = async (event) => {
   try {
@@ -440,6 +441,47 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
 
     const title = body.title || body.titulo || "";
     const descripcion = body.descripcion || body.description || "Sin descripción";
+
+    if (title) {
+      const titleFilter = evaluatePreAi(title);
+      if (!titleFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              titleFilter.explanation ||
+              "El título de la vacante contiene términos no permitidos.",
+            details: titleFilter.matches,
+          }),
+        };
+      }
+    }
+
+    if (descripcion && descripcion !== "Sin descripción") {
+      const descFilter = evaluatePreAi(descripcion);
+      if (!descFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              descFilter.explanation ||
+              "La descripción de la vacante contiene términos no permitidos.",
+            details: descFilter.matches,
+          }),
+        };
+      }
+    }
+
     const modalidad = body.modalidad || body.modality || "Presencial";
     const skills = (body.habilidadesRequeridas || body.skills || []) as string[];
     const resolvedSector = (body.sector || (body.sectores && body.sectores[0]) || "General").trim();
@@ -628,6 +670,46 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
         },
         body: JSON.stringify({ error: "Not authorized to update this job" }),
       };
+    }
+
+    if (body.title || body.titulo) {
+      const titleFilter = evaluatePreAi(body.title || body.titulo);
+      if (!titleFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              titleFilter.explanation ||
+              "El título de la vacante contiene términos no permitidos.",
+            details: titleFilter.matches,
+          }),
+        };
+      }
+    }
+
+    if (body.descripcion || body.description) {
+      const descFilter = evaluatePreAi(body.descripcion || body.description);
+      if (!descFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              descFilter.explanation ||
+              "La descripción de la vacante contiene términos no permitidos.",
+            details: descFilter.matches,
+          }),
+        };
+      }
     }
 
     // Build update expression dynamically

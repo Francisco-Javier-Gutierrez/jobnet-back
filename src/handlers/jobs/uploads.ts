@@ -173,7 +173,7 @@ export const getViewPresignedUrl: APIGatewayProxyHandler = async (event) => {
     const urlParam = event.queryStringParameters?.url;
 
     if (!key && urlParam) {
-      const match = urlParam.match(/(uploads\/[^\?]+)/);
+      const match = urlParam.match(/(uploads\/[^?]+)/);
       if (match) {
         key = match[1];
       }
