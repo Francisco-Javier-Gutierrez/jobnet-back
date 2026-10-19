@@ -9,6 +9,8 @@ import { randomUUID } from "crypto";
 import { docClient, tableName, enrichJobItem } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { evaluatePreAi } from "../../utils/preAiFilter";
+import { moderateTextWithAi } from "../../utils/geminiModeration";
+import { moderateS3Media } from "../../utils/s3ModerationHelper";
 
 export const getJobs: APIGatewayProxyHandler = async (event) => {
   try {
@@ -482,6 +484,46 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       }
     }
 
+    // Evaluación semántica Nivel 1 con IA (solo si superó el filtro Pre-IA Nivel 0)
+    const combinedJobText = `${title}\n${descripcion}`;
+    const aiModeration = await moderateTextWithAi(combinedJobText, "VACANCY");
+    if (!aiModeration.safe) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error:
+            aiModeration.reason ||
+            "La vacante infringe las políticas de igualdad laboral y no discriminación de JobNet.",
+          flaggedCategories: aiModeration.flaggedCategories,
+        }),
+      };
+    }
+
+    if (body.pdfUrl) {
+      const pdfMod = await moderateS3Media(body.pdfUrl, "PDF");
+      if (!pdfMod.safe) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              pdfMod.reason ||
+              "El documento PDF adjunto infringe las políticas de contenido de JobNet.",
+            flaggedCategories: pdfMod.flaggedCategories,
+          }),
+        };
+      }
+    }
+
     const modalidad = body.modalidad || body.modality || "Presencial";
     const skills = (body.habilidadesRequeridas || body.skills || []) as string[];
     const resolvedSector = (body.sector || (body.sectores && body.sectores[0]) || "General").trim();
@@ -707,6 +749,48 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
               descFilter.explanation ||
               "La descripción de la vacante contiene términos no permitidos.",
             details: descFilter.matches,
+          }),
+        };
+      }
+    }
+
+    if (body.title || body.titulo || body.descripcion || body.description) {
+      const updatedTitle = body.title || body.titulo || existing.Item.titulo || "";
+      const updatedDesc = body.descripcion || body.description || existing.Item.descripcion || "";
+      const aiModeration = await moderateTextWithAi(`${updatedTitle}\n${updatedDesc}`, "VACANCY");
+      if (!aiModeration.safe) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              aiModeration.reason ||
+              "La vacante infringe las políticas de igualdad laboral y no discriminación de JobNet.",
+            flaggedCategories: aiModeration.flaggedCategories,
+          }),
+        };
+      }
+    }
+
+    if (body.pdfUrl) {
+      const pdfMod = await moderateS3Media(body.pdfUrl, "PDF");
+      if (!pdfMod.safe) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              pdfMod.reason ||
+              "El documento PDF adjunto infringe las políticas de contenido de JobNet.",
+            flaggedCategories: pdfMod.flaggedCategories,
           }),
         };
       }
