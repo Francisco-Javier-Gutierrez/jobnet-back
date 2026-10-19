@@ -11,7 +11,7 @@ export interface ModerationAiResult {
   reason: string | null;
 }
 
-const DEFAULT_MODEL = "gemini-2.0-flash";
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 const API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /**
