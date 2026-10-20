@@ -280,6 +280,74 @@ export const getVapidPublicKey: APIGatewayProxyHandler = async () => {
   };
 };
 
+// Notificación de Interacción con el CV: Envía de forma inmediata una notificación push al candidato cuando un reclutador abre, visualiza o descarga su CV
+export const notifyCvInteraction: APIGatewayProxyHandler = async (event) => {
+  try {
+    const candidateId = event.pathParameters?.id;
+    if (!candidateId) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: "Missing candidate id in path parameters" }),
+      };
+    }
+
+    const body = JSON.parse(event.body || "{}");
+    const rawAction = (body.action || "VIEW").toUpperCase();
+    const action = rawAction === "DOWNLOAD" ? "DOWNLOAD" : "VIEW";
+    const companyName = body.companyName || body.empresa || "Una organización reclutadora";
+    const recruiterName = body.recruiterName || body.reclutador || "";
+    const vacancyTitle = body.vacancyTitle || body.puesto || "una vacante activa";
+
+    const recruiterEntity = recruiterName
+      ? `${recruiterName} (${companyName})`
+      : companyName;
+
+    const isDownload = action === "DOWNLOAD";
+    const title = isDownload
+      ? "Tu CV ha sido descargado"
+      : "Tu CV ha sido visualizado";
+
+    const message = isDownload
+      ? `${recruiterEntity} ha descargado tu Currículum Vitae para la vacante "${vacancyTitle}".`
+      : `${recruiterEntity} acaba de abrir y visualizar tu Currículum Vitae para la vacante "${vacancyTitle}".`;
+
+    const notifId = await createUserNotification({
+      userId: candidateId,
+      title,
+      message,
+      type: "cv_interaction",
+      url: "/candidate/my-applications",
+      extra: {
+        action,
+        companyName,
+        recruiterName,
+        vacancyTitle,
+        timestamp: new Date().toISOString(),
+      },
+    });
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        notifId,
+        candidateId,
+        action,
+        sentPush: true,
+        message: "Notificación de interacción con el CV enviada exitosamente",
+      }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
 // Listar suscriptores de notificaciones push (Consola de Administración)
 export const getPushSubscribers: APIGatewayProxyHandler = async () => {
   try {

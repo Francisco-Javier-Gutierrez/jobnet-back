@@ -47,6 +47,9 @@ export const getJobApplicants: APIGatewayProxyHandler = async (event) => {
       status: item.status,
       coverLetter: item.coverLetter,
       appliedAt: item.appliedAt,
+      updatedAt: item.updatedAt,
+      motivoRechazo: item.motivoRechazo || item.rejectionReason || null,
+      detallesEntrevista: item.detallesEntrevista || null,
     }));
 
     return {
@@ -97,6 +100,9 @@ export const getMyApplications: APIGatewayProxyHandler = async (event) => {
       status: item.status,
       coverLetter: item.coverLetter,
       appliedAt: item.appliedAt,
+      updatedAt: item.updatedAt,
+      motivoRechazo: item.motivoRechazo || item.rejectionReason || null,
+      detallesEntrevista: item.detallesEntrevista || null,
     }));
 
     return {

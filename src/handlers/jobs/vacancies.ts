@@ -7,6 +7,10 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { docClient, tableName, enrichJobItem } from "./common";
+import { createUserNotification } from "../../utils/webPushService";
+import { evaluatePreAi } from "../../utils/preAiFilter";
+import { moderateTextWithAi } from "../../utils/geminiModeration";
+import { moderateS3Media } from "../../utils/s3ModerationHelper";
 
 export const getJobs: APIGatewayProxyHandler = async (event) => {
   try {
@@ -15,6 +19,10 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
     const modalidad = queryParams.modalidad || "";
     const page = queryParams.page ? Number(queryParams.page) : undefined;
     const limit = queryParams.limit ? Number(queryParams.limit) : undefined;
+    const companyIdParam =
+      queryParams.companyId || queryParams.empresaUuid || "";
+    const includePaused =
+      queryParams.includePaused === "true" || Boolean(companyIdParam);
 
     // 1. Fetch all company profiles to check status
     const profilesItems: any[] = [];
@@ -91,6 +99,27 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
           salario: item.salario || 0,
           salarioMinimo: item.salarioMinimo || 0,
           salarioMaximo: item.salarioMaximo || 0,
+          salarioConfidencial: Boolean(
+            item.salarioConfidencial || item.isSalaryConfidential,
+          ),
+          isSalaryConfidential: Boolean(
+            item.salarioConfidencial || item.isSalaryConfidential,
+          ),
+          municipio: item.municipio || "Toluca",
+          location:
+            item.location ||
+            (item.municipio ? `${item.municipio}, Estado de México` : "Estado de México"),
+          sector: item.sector || (item.sectores && item.sectores[0]) || "General",
+          preguntasFiltro: Array.isArray(item.preguntasFiltro)
+            ? item.preguntasFiltro
+            : Array.isArray(item.screeningQuestions)
+              ? item.screeningQuestions
+              : [],
+          screeningQuestions: Array.isArray(item.preguntasFiltro)
+            ? item.preguntasFiltro
+            : Array.isArray(item.screeningQuestions)
+              ? item.screeningQuestions
+              : [],
           habilidadesRequeridas: item.habilidadesRequeridas || [],
           sectores: item.sectores || [],
           descripcion: item.descripcion || "Sin descripción",
@@ -106,6 +135,10 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
             : null,
           estado: item.estado || "Activa",
           createdAt: item.fechaCreacion || item.createdAt,
+          fechaCierre: item.fechaCierre || item.fechaVigencia,
+          fechaVigencia: item.fechaVigencia || item.fechaCierre,
+          alertaCaducidadEnviada: Boolean(item.alertaCaducidadEnviada),
+          alertaAltaDemandaEnviada: Boolean(item.alertaAltaDemandaEnviada),
           sharesCount: item.sharesCount || 0,
           isDeleted: item.isDeleted || false,
           oculta: item.oculta || false,
@@ -113,11 +146,20 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
         return enrichJobItem(raw);
       })
       .filter((j) => {
+        if (j.isDeleted) return false;
+        if (j.estado === "Eliminada") return false;
+
+        // Organization specific view: allows viewing own active and paused vacancies
+        if (companyIdParam) {
+          if (j.empresaUuid !== companyIdParam) return false;
+          if (!includePaused && j.estado === "PAUSADA") return false;
+          return true;
+        }
+
+        // Public searches: hide paused, closed, suspended and hidden vacancies
         if (j.estado === "CERRADA") return false;
         if (j.estado === "PAUSADA") return false;
         if (j.estado === "SUSPENDIDA") return false;
-        if (j.estado === "Eliminada") return false;
-        if (j.isDeleted) return false;
         if (j.oculta) return false;
         if (suspendedCompanies.has(j.empresaUuid)) return false;
 
@@ -137,6 +179,10 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
         }
         return true;
       });
+
+    if (companyIdParam) {
+      await evaluateAndTriggerVacancyExpirations(items);
+    }
 
     const hasSearchParams = Boolean(q || modalidad || page || limit);
     let bodyContent: any = items;
@@ -302,6 +348,27 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       salario: item.salario || 0,
       salarioMinimo: item.salarioMinimo || 0,
       salarioMaximo: item.salarioMaximo || 0,
+      salarioConfidencial: Boolean(
+        item.salarioConfidencial || item.isSalaryConfidential,
+      ),
+      isSalaryConfidential: Boolean(
+        item.salarioConfidencial || item.isSalaryConfidential,
+      ),
+      municipio: item.municipio || "Toluca",
+      location:
+        item.location ||
+        (item.municipio ? `${item.municipio}, Estado de México` : "Estado de México"),
+      sector: item.sector || (item.sectores && item.sectores[0]) || "General",
+      preguntasFiltro: Array.isArray(item.preguntasFiltro)
+        ? item.preguntasFiltro
+        : Array.isArray(item.screeningQuestions)
+          ? item.screeningQuestions
+          : [],
+      screeningQuestions: Array.isArray(item.preguntasFiltro)
+        ? item.preguntasFiltro
+        : Array.isArray(item.screeningQuestions)
+          ? item.screeningQuestions
+          : [],
       habilidadesRequeridas: item.habilidadesRequeridas || [],
       sectores: item.sectores || [],
       descripcion: item.descripcion || "Sin descripción",
@@ -373,6 +440,110 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
     const body = JSON.parse(event.body || "{}");
     const vacancyUuid = randomUUID();
     const now = new Date().toISOString();
+
+    const title = body.title || body.titulo || "";
+    const descripcion = body.descripcion || body.description || "Sin descripción";
+
+    if (title) {
+      const titleFilter = evaluatePreAi(title);
+      if (!titleFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              titleFilter.explanation ||
+              "El título de la vacante contiene términos no permitidos.",
+            details: titleFilter.matches,
+          }),
+        };
+      }
+    }
+
+    if (descripcion && descripcion !== "Sin descripción") {
+      const descFilter = evaluatePreAi(descripcion);
+      if (!descFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              descFilter.explanation ||
+              "La descripción de la vacante contiene términos no permitidos.",
+            details: descFilter.matches,
+          }),
+        };
+      }
+    }
+
+    // Evaluación semántica Nivel 1 con IA (solo si superó el filtro Pre-IA Nivel 0)
+    const combinedJobText = `${title}\n${descripcion}`;
+    const aiModeration = await moderateTextWithAi(combinedJobText, "VACANCY");
+    if (!aiModeration.safe) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error:
+            aiModeration.reason ||
+            "La vacante infringe las políticas de igualdad laboral y no discriminación de JobNet.",
+          flaggedCategories: aiModeration.flaggedCategories,
+        }),
+      };
+    }
+
+    if (body.pdfUrl) {
+      const pdfMod = await moderateS3Media(body.pdfUrl, "PDF");
+      if (!pdfMod.safe) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              pdfMod.reason ||
+              "El documento PDF adjunto infringe las políticas de contenido de JobNet.",
+            flaggedCategories: pdfMod.flaggedCategories,
+          }),
+        };
+      }
+    }
+
+    const modalidad = body.modalidad || body.modality || "Presencial";
+    const skills = (body.habilidadesRequeridas || body.skills || []) as string[];
+    const resolvedSector = (body.sector || (body.sectores && body.sectores[0]) || "General").trim();
+    const resolvedSectors = Array.isArray(body.sectores) && body.sectores.length > 0
+      ? body.sectores
+      : [resolvedSector];
+
+    const isSalaryConfidential = Boolean(
+      body.salarioConfidencial || body.isSalaryConfidential,
+    );
+    const municipio = body.municipio || "Toluca";
+    const location =
+      body.location ||
+      (municipio ? `${municipio}, Estado de México` : "Estado de México");
+    const validQuestions = Array.isArray(body.preguntasFiltro)
+      ? body.preguntasFiltro.map((q: any) => String(q).trim()).filter((q: string) => q.length > 0).slice(0, 3)
+      : Array.isArray(body.screeningQuestions)
+        ? body.screeningQuestions.map((q: any) => String(q).trim()).filter((q: string) => q.length > 0).slice(0, 3)
+        : [];
+
     const item: Record<string, any> = {
       PK: `VACANCY#${vacancyUuid}`,
       SK: "METADATA",
@@ -382,23 +553,33 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
         body.empresaUuid ||
         (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
         "",
-      titulo: body.title,
+      titulo: title,
+      title: title,
       company: body.company || "Empresa",
-      descripcion: body.descripcion || "Sin descripción",
-      modalidad: body.modalidad || "Presencial",
+      descripcion,
+      description: descripcion,
+      modalidad,
       salario: body.salario || body.salarioMinimo || 0,
       salarioMinimo: body.salarioMinimo || body.salario || 0,
       salarioMaximo: body.salarioMaximo || body.salario || 0,
-      habilidadesRequeridas: body.habilidadesRequeridas || [],
-      sectores: body.sectores || [],
+      salarioConfidencial: isSalaryConfidential,
+      isSalaryConfidential,
+      municipio,
+      location,
+      sector: resolvedSector,
+      sectores: resolvedSectors,
+      habilidadesRequeridas: skills,
+      skills,
+      preguntasFiltro: validQuestions,
+      screeningQuestions: validQuestions,
       aptitudes: body.aptitudes || "",
       experienciaAnos: body.experienciaAnos || 0,
       ubicacion: {
-        lat: body.lat || 0,
-        lng: body.lng || 0,
+        lat: body.lat !== undefined ? body.lat : 19.2826,
+        lng: body.lng !== undefined ? body.lng : -99.6557,
       },
-      lat: body.lat || 0,
-      lng: body.lng || 0,
+      lat: body.lat !== undefined ? body.lat : 19.2826,
+      lng: body.lng !== undefined ? body.lng : -99.6557,
       pdfUrl: body.pdfUrl || "",
       pdfName: body.pdfName || "",
       vacantesDisponibles: body.vacantesDisponibles
@@ -406,6 +587,18 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
         : 1,
       estado: "Activa",
       fechaCreacion: now,
+      fechaCierre:
+        body.fechaCierre ||
+        body.fechaVigencia ||
+        body.expirationDate ||
+        new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      fechaVigencia:
+        body.fechaCierre ||
+        body.fechaVigencia ||
+        body.expirationDate ||
+        new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      alertaCaducidadEnviada: false,
+      alertaAltaDemandaEnviada: false,
     };
 
     if (
@@ -415,6 +608,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
     ) {
       item.maxPostulantes = Number(body.maxPostulantes);
     }
+
     await docClient.send(
       new PutCommand({
         TableName: tableName,
@@ -520,6 +714,88 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
+    if (body.title || body.titulo) {
+      const titleFilter = evaluatePreAi(body.title || body.titulo);
+      if (!titleFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              titleFilter.explanation ||
+              "El título de la vacante contiene términos no permitidos.",
+            details: titleFilter.matches,
+          }),
+        };
+      }
+    }
+
+    if (body.descripcion || body.description) {
+      const descFilter = evaluatePreAi(body.descripcion || body.description);
+      if (!descFilter.isClean) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              descFilter.explanation ||
+              "La descripción de la vacante contiene términos no permitidos.",
+            details: descFilter.matches,
+          }),
+        };
+      }
+    }
+
+    if (body.title || body.titulo || body.descripcion || body.description) {
+      const updatedTitle = body.title || body.titulo || existing.Item.titulo || "";
+      const updatedDesc = body.descripcion || body.description || existing.Item.descripcion || "";
+      const aiModeration = await moderateTextWithAi(`${updatedTitle}\n${updatedDesc}`, "VACANCY");
+      if (!aiModeration.safe) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              aiModeration.reason ||
+              "La vacante infringe las políticas de igualdad laboral y no discriminación de JobNet.",
+            flaggedCategories: aiModeration.flaggedCategories,
+          }),
+        };
+      }
+    }
+
+    if (body.pdfUrl) {
+      const pdfMod = await moderateS3Media(body.pdfUrl, "PDF");
+      if (!pdfMod.safe) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Credentials": true,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            error:
+              pdfMod.reason ||
+              "El documento PDF adjunto infringe las políticas de contenido de JobNet.",
+            flaggedCategories: pdfMod.flaggedCategories,
+          }),
+        };
+      }
+    }
+
     // Build update expression dynamically
     const allowedFields = [
       "titulo",
@@ -531,20 +807,77 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       "salario",
       "salarioMinimo",
       "salarioMaximo",
+      "salarioConfidencial",
+      "isSalaryConfidential",
+      "municipio",
+      "location",
+      "sector",
+      "sectores",
+      "preguntasFiltro",
+      "screeningQuestions",
       "vacantesDisponibles",
       "maxPostulantes",
       "habilidadesRequeridas",
       "skills",
-      "sectores",
       "ubicacion",
       "lat",
       "lng",
-      "location",
       "estado",
       "apelacionComentarios",
       "pdfUrl",
       "pdfName",
+      "fechaCierre",
+      "fechaVigencia",
+      "alertaCaducidadEnviada",
+      "alertaAltaDemandaEnviada",
     ];
+
+    // Normalize aliases for consistency
+    if (body.title !== undefined && body.titulo === undefined) {
+      body.titulo = body.title;
+    } else if (body.titulo !== undefined && body.title === undefined) {
+      body.title = body.titulo;
+    }
+
+    if (body.fechaCierre !== undefined && body.fechaVigencia === undefined) {
+      body.fechaVigencia = body.fechaCierre;
+    } else if (body.fechaVigencia !== undefined && body.fechaCierre === undefined) {
+      body.fechaCierre = body.fechaVigencia;
+    }
+
+    if (body.descripcion !== undefined && body.description === undefined) {
+      body.description = body.descripcion;
+    } else if (body.description !== undefined && body.descripcion === undefined) {
+      body.descripcion = body.description;
+    }
+
+    if (body.skills !== undefined && body.habilidadesRequeridas === undefined) {
+      body.habilidadesRequeridas = body.skills;
+    } else if (body.habilidadesRequeridas !== undefined && body.skills === undefined) {
+      body.skills = body.habilidadesRequeridas;
+    }
+
+    if (body.salarioConfidencial !== undefined && body.isSalaryConfidential === undefined) {
+      body.isSalaryConfidential = Boolean(body.salarioConfidencial);
+    } else if (body.isSalaryConfidential !== undefined && body.salarioConfidencial === undefined) {
+      body.salarioConfidencial = Boolean(body.isSalaryConfidential);
+    }
+
+    if (body.preguntasFiltro !== undefined && body.screeningQuestions === undefined) {
+      body.screeningQuestions = Array.isArray(body.preguntasFiltro)
+        ? body.preguntasFiltro.slice(0, 3)
+        : [];
+      body.preguntasFiltro = body.screeningQuestions;
+    } else if (body.screeningQuestions !== undefined && body.preguntasFiltro === undefined) {
+      body.preguntasFiltro = Array.isArray(body.screeningQuestions)
+        ? body.screeningQuestions.slice(0, 3)
+        : [];
+      body.screeningQuestions = body.preguntasFiltro;
+    }
+
+    if (body.lat !== undefined && body.lng !== undefined && body.ubicacion === undefined) {
+      body.ubicacion = { lat: body.lat, lng: body.lng };
+    }
 
     const expressionParts: string[] = [];
     const expressionAttrValues: Record<string, any> = {};
@@ -709,6 +1042,151 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ success: true, id, estado: "CERRADA" }),
+    };
+  } catch (error: unknown) {
+    return {
+      statusCode: 500,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ error: (error as Error).message }),
+    };
+  }
+};
+
+/**
+ * Evalúa las vacantes de la empresa o sistema y dispara recordatorio automático
+ * exactamente 3 días antes (o menos) de que se cumpla la fecha de vigencia/cierre estipulada.
+ */
+export async function evaluateAndTriggerVacancyExpirations(vacancies: any[]): Promise<any[]> {
+  const nowMs = Date.now();
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+  for (const vacancy of vacancies) {
+    try {
+      if (!vacancy || vacancy.estado === "CERRADA" || vacancy.estado === "Eliminada") {
+        continue;
+      }
+
+      const expirationDateStr =
+        vacancy.fechaCierre ||
+        vacancy.fechaVigencia ||
+        (vacancy.createdAt
+          ? new Date(new Date(vacancy.createdAt).getTime() + 30 * ONE_DAY_MS).toISOString()
+          : null);
+
+      if (!expirationDateStr) continue;
+
+      const expirationMs = new Date(expirationDateStr).getTime();
+      const diffMs = expirationMs - nowMs;
+      const daysRemaining = Math.ceil(diffMs / ONE_DAY_MS);
+
+      // Si faltan 3 días o menos (y aún no ha expirado) y no se ha emitido recordatorio
+      if (
+        daysRemaining <= 3 &&
+        daysRemaining >= 0 &&
+        !vacancy.alertaCaducidadEnviada
+      ) {
+        const companyId = vacancy.empresaUuid;
+        const jobTitle = vacancy.title || vacancy.titulo || "Oferta de empleo";
+        const formattedDate = new Date(expirationDateStr).toLocaleDateString("es-MX", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+
+        if (companyId) {
+          createUserNotification({
+            userId: companyId,
+            title: "Recordatorio de vigencia de vacante",
+            message: `Tu vacante "${jobTitle}" está a ${daysRemaining === 0 ? "menos de 24 horas" : `${daysRemaining} día(s)`} de cumplir su periodo de vigencia (cierre estipulado: ${formattedDate}).`,
+            type: "expiration_reminder",
+            url: "/my-vacancies",
+            extra: {
+              jobId: vacancy.id,
+              fechaCierre: expirationDateStr,
+              diasRestantes: daysRemaining,
+            },
+          }).catch((err) =>
+            console.error("Error creating vacancy expiration reminder:", err),
+          );
+        }
+
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: {
+              PK: `VACANCY#${vacancy.id}`,
+              SK: "METADATA",
+            },
+            UpdateExpression:
+              "SET alertaCaducidadEnviada = :flag, fechaAlertaCaducidad = :fecha",
+            ExpressionAttributeValues: {
+              ":flag": true,
+              ":fecha": new Date().toISOString(),
+            },
+          }),
+        );
+
+        vacancy.alertaCaducidadEnviada = true;
+      }
+    } catch (e) {
+      console.error("Error evaluating vacancy expiration:", e);
+    }
+  }
+
+  return vacancies;
+}
+
+export const checkVacancyExpirations: APIGatewayProxyHandler = async (event) => {
+  try {
+    const vacanciesItems: any[] = [];
+    let lastEvaluatedKey: any = undefined;
+
+    do {
+      const result = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          IndexName: "GSI1",
+          KeyConditionExpression: "GSI1PK = :gsiPk",
+          ExpressionAttributeValues: {
+            ":gsiPk": "VACANCIES",
+          },
+          ExclusiveStartKey: lastEvaluatedKey,
+        }),
+      );
+      if (result.Items) {
+        vacanciesItems.push(...result.Items);
+      }
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    const mappedVacancies = vacanciesItems.map((item) => ({
+      id: item.PK.replace("VACANCY#", ""),
+      empresaUuid: item.empresaUuid,
+      title: item.titulo || item.title,
+      estado: item.estado,
+      createdAt: item.fechaCreacion || item.createdAt,
+      fechaCierre: item.fechaCierre || item.fechaVigencia,
+      fechaVigencia: item.fechaVigencia || item.fechaCierre,
+      alertaCaducidadEnviada: Boolean(item.alertaCaducidadEnviada),
+    }));
+
+    await evaluateAndTriggerVacancyExpirations(mappedVacancies);
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        success: true,
+        evaluatedCount: mappedVacancies.length,
+      }),
     };
   } catch (error: unknown) {
     return {

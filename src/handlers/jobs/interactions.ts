@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
+import { evaluatePreAi } from "../../utils/preAiFilter";
 
 export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
   try {
@@ -104,6 +105,20 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: "Falta el contenido del comentario" }),
+      };
+    }
+
+    const filterResult = evaluatePreAi(content);
+    if (!filterResult.isClean) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error:
+            filterResult.explanation ||
+            "El comentario contiene términos no permitidos.",
+          details: filterResult.matches,
+        }),
       };
     }
 

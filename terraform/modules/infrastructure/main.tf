@@ -100,6 +100,30 @@ resource "aws_cognito_resource_server" "resource_server" {
   }
 }
 
+resource "aws_cognito_user_pool_domain" "domain" {
+  domain       = var.cognito_domain_prefix != "" ? "${var.cognito_domain_prefix}-${var.environment}" : "jobnet-auth-${var.environment}"
+  user_pool_id = aws_cognito_user_pool.pool.id
+}
+
+resource "aws_cognito_identity_provider" "google" {
+  count         = var.google_client_id != "" ? 1 : 0
+  user_pool_id  = aws_cognito_user_pool.pool.id
+  provider_name = "Google"
+  provider_type = "Google"
+
+  provider_details = {
+    client_id        = var.google_client_id
+    client_secret    = var.google_client_secret
+    authorize_scopes = "email openid profile"
+  }
+
+  attribute_mapping = {
+    email    = "email"
+    name     = "name"
+    username = "sub"
+  }
+}
+
 resource "aws_cognito_user_pool_client" "client" {
   name         = "jobnet-app-client-${var.environment}"
   user_pool_id = aws_cognito_user_pool.pool.id
@@ -119,14 +143,23 @@ resource "aws_cognito_user_pool_client" "client" {
   ]
   callback_urls = [
     "http://localhost:3000/api/auth/callback/cognito",
-    "https://jobnet.franciscojgh.com/api/auth/callback/cognito"
+    "http://localhost:3000",
+    "https://jobnet.franciscojgh.com/api/auth/callback/cognito",
+    "https://jobnet.franciscojgh.com",
+    "https://dsty3j5u0b31g.cloudfront.net/api/auth/callback/cognito",
+    "https://dsty3j5u0b31g.cloudfront.net"
   ]
   logout_urls = [
     "http://localhost:3000",
-    "https://jobnet.franciscojgh.com"
+    "https://jobnet.franciscojgh.com",
+    "https://dsty3j5u0b31g.cloudfront.net"
   ]
-  supported_identity_providers = ["COGNITO"]
-  depends_on                   = [aws_cognito_resource_server.resource_server]
+  supported_identity_providers = var.google_client_id != "" ? ["COGNITO", "Google"] : ["COGNITO"]
+  depends_on = [
+    aws_cognito_resource_server.resource_server,
+    aws_cognito_identity_provider.google,
+    aws_cognito_user_pool_domain.domain
+  ]
 }
 
 resource "aws_dynamodb_table" "jobs" {
@@ -229,12 +262,12 @@ resource "aws_opensearch_domain" "search" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect    = "Allow"
+        Effect = "Allow"
         Principal = {
           AWS = "*"
         }
-        Action    = "es:*"
-        Resource  = "arn:aws:es:us-east-1:${data.aws_caller_identity.current.account_id}:domain/jobnet-search-${var.environment}/*"
+        Action   = "es:*"
+        Resource = "arn:aws:es:us-east-1:${data.aws_caller_identity.current.account_id}:domain/jobnet-search-${var.environment}/*"
         Condition = {
           StringEquals = {
             "aws:PrincipalAccount" = data.aws_caller_identity.current.account_id

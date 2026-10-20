@@ -49,7 +49,12 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import { getAuditLogs, getBlockedDomains, toggleUserBlock } from "./governance";
+import {
+  getAuditLogs,
+  getBlockedDomains,
+  toggleUserBlock,
+  getModeratorConcurrencyAlerts,
+} from "./governance";
 import {
   blockCorporateDomain,
   saveAuditLog,
@@ -320,6 +325,103 @@ describe("moderator governance handlers", () => {
         () => {},
       );
       expect(res.statusCode).toBe(500);
+    });
+  });
+
+  describe("getModeratorConcurrencyAlerts (Detección de Concurrencia Anómala para Moderadores)", () => {
+    it("should deny access with 403 when user is CANDIDATO or ORGANIZACION", async () => {
+      const res: any = await getModeratorConcurrencyAlerts(
+        {
+          headers: { "x-user-role": "CANDIDATO" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(403);
+      const body = JSON.parse(res.body);
+      expect(body.error).toContain("exclusivo para Moderadores de Comunidad");
+    });
+
+    it("should allow access and return baseline anomalies when called by MODERATOR", async () => {
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Vacancies
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Incidents
+
+      const res: any = await getModeratorConcurrencyAlerts(
+        {
+          headers: { "x-user-role": "MODERATOR" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.success).toBe(true);
+      expect(body.anomalies).toBeDefined();
+      expect(body.anomalies.length).toBeGreaterThan(0);
+    });
+
+    it("should detect anomalous concurrency of > 10 vacancies in < 1h for moderator", async () => {
+      const now = Date.now();
+      const rapidVacancies = Array.from({ length: 13 }, (_, i) => ({
+        PK: `VACANCY#spam-${i}`,
+        empresaUuid: "org-bot-recruiter-55",
+        company: "Bot Express S.A.",
+        fechaCreacion: new Date(now - i * 2 * 60 * 1000).toISOString(),
+      }));
+
+      mockDynamoSend.mockResolvedValueOnce({ Items: rapidVacancies });
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+
+      const res: any = await getModeratorConcurrencyAlerts(
+        {
+          headers: { "x-user-role": "MODERATOR" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      const detected = body.anomalies.find(
+        (a: any) => a.organizationId === "org-bot-recruiter-55",
+      );
+      expect(detected).toBeDefined();
+      expect(detected.type).toBe("RAPID_VACANCIES");
+      expect(detected.count).toBe(13);
+      expect(detected.threshold).toBe(10);
+      expect(detected.timeWindow).toBe("< 1 hora");
+    });
+
+    it("should detect anomalous concurrency of > 5 reports in < 1h for moderator", async () => {
+      const now = Date.now();
+      const surgeReports = Array.from({ length: 8 }, (_, i) => ({
+        PK: `INCIDENT#rep-${i}`,
+        companyId: "org-scam-99",
+        companyName: "Scam & Co",
+        fechaCreacion: new Date(now - i * 3 * 60 * 1000).toISOString(),
+      }));
+
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+      mockDynamoSend.mockResolvedValueOnce({ Items: surgeReports });
+
+      const res: any = await getModeratorConcurrencyAlerts(
+        {
+          headers: { "x-user-role": "MODERADOR" },
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      const detected = body.anomalies.find(
+        (a: any) => a.organizationId === "org-scam-99",
+      );
+      expect(detected).toBeDefined();
+      expect(detected.type).toBe("REPORT_SURGE");
+      expect(detected.count).toBe(8);
+      expect(detected.threshold).toBe(5);
     });
   });
 });

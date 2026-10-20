@@ -147,6 +147,26 @@ describe("posts interactions handlers", () => {
       expect(data.text).toBe("Great insight!");
     });
 
+    it("should reject comment if content contains toxic words or acronyms (Pre-AI Filter)", async () => {
+      const res = await addCommentPost(
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({
+            author: "Troll",
+            content: "Callate pendejo vtalv",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.error).toContain("Contenido bloqueado por el filtro de seguridad");
+      expect(data.details).toContain("pendejo");
+      expect(data.details).toContain("vtalv");
+      expect(mockDynamoSend).not.toHaveBeenCalled();
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Comment error"));
       const res = await addCommentPost(

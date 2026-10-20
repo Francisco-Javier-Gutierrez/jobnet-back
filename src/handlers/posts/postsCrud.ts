@@ -7,6 +7,9 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { docClient, tableName, headers } from "./common";
+import { evaluatePreAi } from "../../utils/preAiFilter";
+import { moderateTextWithAi } from "../../utils/geminiModeration";
+import { moderateS3Media } from "../../utils/s3ModerationHelper";
 
 export const getPosts: APIGatewayProxyHandler = async (event) => {
   try {
@@ -184,6 +187,68 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
           error: "Debe ingresar contenido, imagen o documento PDF.",
         }),
       };
+    }
+
+    if (content) {
+      const filterResult = evaluatePreAi(content);
+      if (!filterResult.isClean) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              filterResult.explanation ||
+              "El contenido infringe las normas de convivencia de JobNet.",
+            details: filterResult.matches,
+          }),
+        };
+      }
+
+      const aiModeration = await moderateTextWithAi(content, "POST");
+      if (!aiModeration.safe) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              aiModeration.reason ||
+              "La publicación infringe las políticas comunitarias.",
+            flaggedCategories: aiModeration.flaggedCategories,
+          }),
+        };
+      }
+    }
+
+    if (media) {
+      const mediaMod = await moderateS3Media(media, "IMAGE");
+      if (!mediaMod.safe) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              mediaMod.reason ||
+              "La imagen adjunta infringe las políticas de contenido de JobNet.",
+            flaggedCategories: mediaMod.flaggedCategories,
+          }),
+        };
+      }
+    }
+
+    if (pdfUrl) {
+      const pdfMod = await moderateS3Media(pdfUrl, "PDF");
+      if (!pdfMod.safe) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              pdfMod.reason ||
+              "El documento adjunto infringe las políticas de contenido de JobNet.",
+            flaggedCategories: pdfMod.flaggedCategories,
+          }),
+        };
+      }
     }
 
     const postUuid = `post-${randomUUID()}`;

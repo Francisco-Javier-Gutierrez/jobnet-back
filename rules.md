@@ -13,6 +13,10 @@ Por favor, lee con detenimiento este documento antes de comenzar a programar.
 - **Ramas de trabajo**: Crea siempre ramas partiendo de `develop` con los prefijos:
   - `feature/nombre-de-la-feature`
   - `fix/nombre-del-error`
+- **Aislamiento Estricto de Ramas Mock y Datos de Prueba**:
+  - Las ramas de datos mock y herramientas de simulación (por ejemplo `feature/mock-*`) son **únicamente para sus ramas dedicadas**, no para el proyecto general.
+  - **JAMÁS deben ser mergeadas ni a `main` ni a `develop`**.
+  - Las ramas `develop` y `main` deben permanecer estrictamente limpias de devtools de mock, inyecciones ficticias de sesión o datos simulados no autorizados.
 
 ---
 

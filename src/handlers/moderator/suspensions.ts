@@ -14,6 +14,7 @@ import {
   broadcastAppealResolved,
   getOrgAppealMessageCount,
   executeOrgSuspensionInitiation,
+  sendEmailToCompany,
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
 
@@ -145,6 +146,15 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
       console.error("Error sending push for favorable appeal:", err),
     );
 
+    // Disparar Correo Directo por SES (Fase 3a)
+    sendEmailToCompany(
+      companyId,
+      "RESOLUCIÓN FAVORABLE: Suspensión Revocada y Cuenta Restablecida",
+      `Nos complace informarle que la apelación presentada ha sido evaluada favorablemente. El proceso de suspensión ha sido revocado y su cuenta se encuentra nuevamente activa en JobNet.\n\nDictamen / Notas del Moderador: ${notes}`,
+    ).catch((err) =>
+      console.error("Error sending SES email for favorable appeal:", err),
+    );
+
     // 4. Auditoría
     await saveAuditLog({
       targetId: companyId,
@@ -194,16 +204,29 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       "Dictamen desfavorable tras proceso de evaluación/apelación";
     const timestamp = new Date().toISOString();
 
-    // Validar regla de al menos 3 mensajes por parte de la organización en el chat
+    // Validar regla de al menos 3 mensajes por parte de la organización en el chat (o periodo expirado / forzado por falta de respuesta)
     const orgMsgCount = await getOrgAppealMessageCount(companyId);
-    if (orgMsgCount < 3) {
-      return {
-        statusCode: 400,
-        headers,
-        body: JSON.stringify({
-          error: `Se requieren al menos 3 mensajes de evidencia o justificación por parte de la organización en el chat de apelación para emitir dictamen final. (Mensajes actuales de la empresa: ${orgMsgCount}/3)`,
-        }),
-      };
+    if (orgMsgCount < 3 && !body.force) {
+      const profileRes = await docClient
+        .send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+          }),
+        )
+        .catch(() => ({ Item: null }));
+      const graceEnd = profileRes.Item?.suspensionGracePeriodEnd;
+      const isPeriodExpired = graceEnd && new Date() >= new Date(graceEnd);
+
+      if (!isPeriodExpired) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error: `Se requieren al menos 3 mensajes de evidencia o justificación por parte de la organización en el chat de apelación para emitir dictamen final anticipado. (Mensajes actuales de la empresa: ${orgMsgCount}/3)`,
+          }),
+        };
+      }
     }
 
     // 1. Eliminar registro de periodo de gracia TTL
@@ -290,6 +313,15 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       data: { type: "SUSPENSION_CONFIRMED", companyId },
     }).catch((err) =>
       console.error("Error sending push for final suspension:", err),
+    );
+
+    // Disparar Correo Directo por SES (Fase 3b)
+    sendEmailToCompany(
+      companyId,
+      "RESOLUCIÓN FINAL: Cuenta Suspendida por Infracción",
+      `Le informamos que tras evaluar el expediente y la apelación correspondiente, se ha emitido un dictamen desfavorable. Su cuenta ha sido suspendida definitivamente de la plataforma JobNet, su inicio de sesión ha sido bloqueado y todas sus vacantes han sido ocultadas del Job Board.\n\nMotivo del dictamen: ${reason}`,
+    ).catch((err) =>
+      console.error("Error sending SES email for final suspension:", err),
     );
 
     // 5. Auditoría
@@ -447,6 +479,42 @@ export const handleSuspensionExpiry = async (event: any) => {
               );
             }
           }
+
+          // Notificación interna, Web Push y Correo Directo SES (Fase 3c: Expiración sin respuesta)
+          const notifId = Math.random().toString(36).substring(2, 15);
+          await docClient.send(
+            new PutCommand({
+              TableName: tableName,
+              Item: {
+                PK: `USER#${companyId}`,
+                SK: `NOTIFICATION#${timestamp}#${notifId}`,
+                id: notifId,
+                type: "SUSPENSION_CONFIRMED",
+                title: "Resolución Automática: Cuenta Suspendida",
+                message:
+                  "El periodo de gracia para apelar ha concluido sin resolución favorable. Su cuenta ha sido suspendida definitivamente y sus vacantes han sido ocultadas.",
+                createdAt: timestamp,
+                read: false,
+              },
+            }),
+          );
+
+          sendPushToUser(companyId, {
+            title: "Resolución Automática: Cuenta Suspendida 🚫",
+            body: "El periodo de gracia para apelar ha concluido sin respuesta/resolución favorable. Su cuenta ha sido suspendida definitivamente.",
+            url: "/notifications",
+            data: { type: "SUSPENSION_CONFIRMED", companyId },
+          }).catch((err) =>
+            console.error("Error sending push for TTL suspension:", err),
+          );
+
+          sendEmailToCompany(
+            companyId,
+            "RESOLUCIÓN AUTOMÁTICA: Cuenta Suspendida por Expiración de Periodo de Gracia",
+            "Le informamos que el periodo de gracia concedido para atender el proceso de revisión de su cuenta ha concluido sin una resolución favorable o sin justificación probatoria. En consecuencia, su cuenta ha sido suspendida definitivamente, su acceso ha sido bloqueado y sus ofertas han sido retiradas de la plataforma.",
+          ).catch((err) =>
+            console.error("Error sending SES email for TTL suspension:", err),
+          );
 
           await saveAuditLog({
             targetId: companyId,

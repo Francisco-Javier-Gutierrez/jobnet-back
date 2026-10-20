@@ -19,6 +19,16 @@ export interface JobItemInput {
   fechaCreacion?: string;
   createdAt?: string;
   sector?: string;
+  salarioConfidencial?: boolean;
+  isSalaryConfidential?: boolean;
+  municipio?: string;
+  location?: string;
+  preguntasFiltro?: string[];
+  screeningQuestions?: string[];
+  fechaCierre?: string;
+  fechaVigencia?: string;
+  alertaCaducidadEnviada?: boolean;
+  alertaAltaDemandaEnviada?: boolean;
   [key: string]: any;
 }
 
@@ -32,6 +42,12 @@ export interface EnrichedJobItem {
   modalidad: string;
   salario: number;
   salarioFormatted: string;
+  salarioConfidencial?: boolean;
+  isSalaryConfidential?: boolean;
+  municipio?: string;
+  location?: string;
+  preguntasFiltro?: string[];
+  screeningQuestions?: string[];
   habilidadesRequeridas: string[];
   sectores: string[];
   descripcion: string;
@@ -46,6 +62,11 @@ export interface EnrichedJobItem {
   };
   ubicacionFormatted: string;
   createdAt: string;
+  fechaCierre?: string;
+  fechaVigencia?: string;
+  diasParaVencer?: number;
+  alertaCaducidadEnviada?: boolean;
+  alertaAltaDemandaEnviada?: boolean;
   userContext?: {
     isApplied: boolean;
     applicationId: string | null;
@@ -56,7 +77,10 @@ export interface EnrichedJobItem {
   [key: string]: any;
 }
 
-export function formatSalary(salario?: number): string {
+export function formatSalary(salario?: number, isConfidential?: boolean): string {
+  if (isConfidential) {
+    return "Salario confidencial";
+  }
   if (!salario || salario <= 0) {
     return "A convenir";
   }
@@ -124,6 +148,31 @@ export function enrichJobItem(
   const applicationData = appliedJobsMap ? appliedJobsMap.get(id) : null;
   const isBookmarked = bookmarkedJobIds ? bookmarkedJobIds.has(id) : false;
 
+  const isSalaryConfidential = Boolean(
+    item.salarioConfidencial || item.isSalaryConfidential,
+  );
+  const preguntasFiltro = Array.isArray(item.preguntasFiltro)
+    ? item.preguntasFiltro
+    : Array.isArray(item.screeningQuestions)
+      ? item.screeningQuestions
+      : [];
+  const municipio =
+    item.municipio ||
+    (item.location ? item.location.replace(", Estado de México", "").trim() : "Toluca");
+  const location =
+    item.location || (municipio ? `${municipio}, Estado de México` : "Estado de México");
+  const sector = item.sector || (item.sectores && item.sectores[0]) || "General";
+
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const createdAt = item.fechaCreacion || item.createdAt || new Date().toISOString();
+  const fechaCierre =
+    item.fechaCierre ||
+    item.fechaVigencia ||
+    new Date(new Date(createdAt).getTime() + 30 * ONE_DAY_MS).toISOString();
+  const diasParaVencer = Math.ceil(
+    (new Date(fechaCierre).getTime() - Date.now()) / ONE_DAY_MS,
+  );
+
   const enriched: EnrichedJobItem = {
     ...item,
     id,
@@ -134,7 +183,14 @@ export function enrichJobItem(
     lng: item.ubicacion?.lng ?? item.lng ?? 0,
     modalidad: item.modalidad || "Presencial",
     salario: item.salario || 0,
-    salarioFormatted: formatSalary(item.salario),
+    salarioFormatted: formatSalary(item.salario, isSalaryConfidential),
+    salarioConfidencial: isSalaryConfidential,
+    isSalaryConfidential,
+    municipio,
+    location,
+    sector,
+    preguntasFiltro,
+    screeningQuestions: preguntasFiltro,
     habilidadesRequeridas: item.habilidadesRequeridas || [],
     sectores: item.sectores || [],
     descripcion: item.descripcion || "Sin descripción",
@@ -145,7 +201,12 @@ export function enrichJobItem(
     estado,
     estadoBadge: getEstadoBadge(estado),
     ubicacionFormatted: formatUbicacion(item),
-    createdAt: item.fechaCreacion || item.createdAt || new Date().toISOString(),
+    createdAt,
+    fechaCierre,
+    fechaVigencia: fechaCierre,
+    diasParaVencer,
+    alertaCaducidadEnviada: Boolean(item.alertaCaducidadEnviada),
+    alertaAltaDemandaEnviada: Boolean(item.alertaAltaDemandaEnviada),
   };
 
   if (appliedJobsMap !== undefined || bookmarkedJobIds !== undefined) {

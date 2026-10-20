@@ -13,6 +13,7 @@ import {
   PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
 import { sendPushToUser } from "../../utils/webPushService";
+import { isPublicEmailDomain } from "../../utils/domainVerifier";
 
 export const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -159,7 +160,7 @@ export const getOrgAppealMessageCount = async (
 
 export interface AuditLogParams {
   targetId: string;
-  targetType: "ORGANIZACION" | "VACANTE" | "CANDIDATO";
+  targetType: "ORGANIZACION" | "VACANTE" | "CANDIDATO" | "INCIDENTE" | "POST";
   action: string;
   reason: string;
   executorId?: string;
@@ -201,13 +202,7 @@ export async function blockCorporateDomain(
   reason: string,
   companyId?: string,
 ) {
-  if (
-    !domain ||
-    domain.includes("gmail.com") ||
-    domain.includes("outlook.com") ||
-    domain.includes("hotmail.com") ||
-    domain.includes("yahoo.com")
-  ) {
+  if (!domain || isPublicEmailDomain(domain)) {
     return; // Do not block public provider email domains
   }
 
@@ -342,7 +337,32 @@ export async function executeOrgSuspensionInitiation(
     console.error("Error sending push for suspension process:", err),
   );
 
-  // 5. Enviar correo electrónico oficial por SES
+  // 5. Enviar correo electrónico oficial por SES (Fase 1)
+  await sendEmailToCompany(
+    companyId,
+    "ALERTA DE SEGURIDAD: Notificación Oficial de Infracción y Proceso de Suspensión",
+    `Su cuenta en la plataforma JobNet ha entrado en estado de Revisión debido a reportes o infracciones detectadas:\n\nMotivo: ${reason}\n\nSe ha iniciado un periodo de gracia hasta el ${new Date(
+      gracePeriodEnd,
+    ).toLocaleDateString()}. Puede ingresar a su panel corporativo y acceder a la sección de Apelaciones para comunicarse en tiempo real por chat con el equipo de moderación.`,
+  );
+
+  // 6. Auditoría
+  await saveAuditLog({
+    targetId: companyId,
+    targetType: "ORGANIZACION",
+    action: "INICIO_PROCESO_SUSPENSION",
+    reason: `Motivo: ${reason}. Días de gracia: ${graceDays}. Expiración: ${gracePeriodEnd}`,
+    executorId: "ADMIN",
+  });
+
+  return { gracePeriodEnd, timestamp };
+}
+
+export async function sendEmailToCompany(
+  companyId: string,
+  subject: string,
+  bodyText: string,
+) {
   try {
     const companyProfile = await docClient.send(
       new GetCommand({
@@ -365,43 +385,30 @@ export async function executeOrgSuspensionInitiation(
       await sesClient
         .send(
           new SendEmailCommand({
-            Source: "noreply@franciscojgh.com",
+            Source: "contacto@franciscojgh.com",
             Destination: {
               ToAddresses: [companyEmail],
             },
             Message: {
               Subject: {
-                Data: `ALERTA DE SEGURIDAD: Notificación Oficial de Infracción y Proceso de Suspensión (${companyName})`,
+                Data: `${subject} (${companyName})`,
               },
               Body: {
                 Text: {
-                  Data: `Estimado representante de ${companyName},\n\nSu cuenta en la plataforma JobNet ha entrado en estado de Revisión debido a reportes o infracciones detectadas:\n\nMotivo: ${reason}\n\nSe ha iniciado un periodo de gracia hasta el ${new Date(
-                    gracePeriodEnd,
-                  ).toLocaleDateString()}. Puede ingresar a su panel corporativo y acceder a la sección de Apelaciones para comunicarse en tiempo real por chat con el equipo de moderación.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
+                  Data: `Estimado representante de ${companyName},\n\n${bodyText}\n\nAtentamente,\nEquipo de Moderación y Administración de JobNet`,
                 },
               },
             },
           }),
         )
         .catch((err) =>
-          console.error("Error sending SES email for org suspension:", err),
+          console.error(`Error sending SES email to ${companyEmail}:`, err),
         );
     }
   } catch (err) {
     console.error(
-      "Error fetching company profile for SES email in initiateSuspension:",
+      `Error fetching company profile for SES email (${companyId}):`,
       err,
     );
   }
-
-  // 6. Auditoría
-  await saveAuditLog({
-    targetId: companyId,
-    targetType: "ORGANIZACION",
-    action: "INICIO_PROCESO_SUSPENSION",
-    reason: `Motivo: ${reason}. Días de gracia: ${graceDays}. Expiración: ${gracePeriodEnd}`,
-    executorId: "ADMIN",
-  });
-
-  return { gracePeriodEnd, timestamp };
 }

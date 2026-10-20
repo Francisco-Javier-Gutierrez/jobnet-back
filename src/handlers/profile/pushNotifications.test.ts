@@ -48,6 +48,7 @@ import {
   savePushSubscription,
   deletePushSubscription,
   getVapidPublicKey,
+  notifyCvInteraction,
   getPushSubscribers,
   sendCustomPushNotification,
 } from "./notifications";
@@ -310,7 +311,6 @@ describe("push notifications", () => {
     });
 
     it("sends notifications to selected users", async () => {
-      // Mock Query for user push subs
       mockDynamoSend.mockResolvedValue({
         Items: [
           {
@@ -339,6 +339,74 @@ describe("push notifications", () => {
       const data = JSON.parse(res.body);
       expect(data.targetedUsers).toBe(1);
       expect(data.sent).toBe(1);
+    });
+  });
+
+  describe("notifyCvInteraction handler (Notificación de Interacción con el CV)", () => {
+    it("returns 400 when candidate id is missing", async () => {
+      const res: any = await notifyCvInteraction(
+        { pathParameters: {} } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error).toContain("Missing candidate id");
+    });
+
+    it("saves notification and returns 200 on VIEW action", async () => {
+      mockDynamoSend.mockResolvedValueOnce({});
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [
+          {
+            endpoint: "https://push.example.com/sub/cand-1",
+            keys: { p256dh: "p256", auth: "auth" },
+          },
+        ],
+      });
+
+      const res: any = await notifyCvInteraction(
+        {
+          pathParameters: { id: "cand-1" },
+          body: JSON.stringify({
+            action: "VIEW",
+            recruiterName: "Laura Reclutadora",
+            companyName: "TechCorp México",
+            vacancyTitle: "Frontend Senior",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.success).toBe(true);
+      expect(data.action).toBe("VIEW");
+      expect(data.sentPush).toBe(true);
+      expect(mockWebPushSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("saves notification and returns 200 on DOWNLOAD action", async () => {
+      mockDynamoSend.mockResolvedValueOnce({});
+      mockDynamoSend.mockResolvedValueOnce({ Items: [] });
+
+      const res: any = await notifyCvInteraction(
+        {
+          pathParameters: { id: "cand-2" },
+          body: JSON.stringify({
+            action: "DOWNLOAD",
+            companyName: "Banco Innovador",
+            vacancyTitle: "Líder Técnico",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.success).toBe(true);
+      expect(data.action).toBe("DOWNLOAD");
     });
   });
 });

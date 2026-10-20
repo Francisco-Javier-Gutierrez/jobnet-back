@@ -1,6 +1,12 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import { PutCommand, QueryCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient, tableName, headers } from "./common";
+import {
+  PutCommand,
+  QueryCommand,
+  GetCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
+import { SendEmailCommand } from "@aws-sdk/client-ses";
+import { docClient, sesClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 
 /**
@@ -54,6 +60,17 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
         };
       }
 
+      if (jobResult.Item.estado === "PAUSADA") {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              "Esta vacante se encuentra pausada temporalmente por la organización.",
+          }),
+        };
+      }
+
       const maxPostulantes = jobResult.Item.maxPostulantes;
       if (maxPostulantes && Number(maxPostulantes) > 0) {
         const applicantsResult = await docClient.send(
@@ -79,6 +96,50 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
           };
         }
       }
+
+      // Validate required screening questions (preguntas filtro)
+      const screeningQuestions: string[] =
+        jobResult.Item.preguntasFiltro ||
+        jobResult.Item.screeningQuestions ||
+        [];
+      if (screeningQuestions.length > 0) {
+        const respuestasFiltro = body.respuestasFiltro;
+        let hasMissingAnswers = false;
+
+        if (!respuestasFiltro) {
+          hasMissingAnswers = true;
+        } else if (Array.isArray(respuestasFiltro)) {
+          for (const q of screeningQuestions) {
+            const match = respuestasFiltro.find(
+              (r: any) =>
+                (typeof r === "object" && r?.pregunta === q && r?.respuesta?.trim()) ||
+                (typeof r === "string" && r.trim().length > 0)
+            );
+            if (!match) {
+              hasMissingAnswers = true;
+              break;
+            }
+          }
+        } else if (typeof respuestasFiltro === "object") {
+          for (const q of screeningQuestions) {
+            if (!respuestasFiltro[q]?.trim()) {
+              hasMissingAnswers = true;
+              break;
+            }
+          }
+        }
+
+        if (hasMissingAnswers) {
+          return {
+            statusCode: 400,
+            headers,
+            body: JSON.stringify({
+              error:
+                "Debes responder obligatoriamente a todas las preguntas filtro de precalificación requeridas por la empresa.",
+            }),
+          };
+        }
+      }
     }
 
     const appliedAt = new Date().toISOString();
@@ -92,6 +153,10 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
 
     if (coverLetter) {
       applicationData.coverLetter = coverLetter;
+    }
+
+    if (body.respuestasFiltro) {
+      applicationData.respuestasFiltro = body.respuestasFiltro;
     }
 
     // Write employer-view item (PK=JOB#, SK=APP#candidateId)
@@ -164,6 +229,113 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
     }).catch((err) =>
       console.error("Error creating candidate notification:", err),
     );
+
+    // Consulta de conteo para Alerta de Alta Demanda (exactamente a los 50 postulantes)
+    try {
+      const countRes = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+          ExpressionAttributeValues: {
+            ":pk": `JOB#${jobId}`,
+            ":skPrefix": "APP#",
+          },
+          Select: "COUNT",
+        }),
+      );
+      const totalApplicants = countRes.Count ?? (countRes.Items || []).length;
+
+      if (
+        totalApplicants === 50 &&
+        !jobResult.Item?.alertaAltaDemandaEnviada &&
+        targetCompanyId
+      ) {
+        // 1. Notificación push en la plataforma
+        createUserNotification({
+          userId: targetCompanyId,
+          title: "Alta demanda de postulaciones",
+          message: `Tu vacante "${jobTitle}" ha alcanzado exactamente 50 postulantes.`,
+          type: "high_demand",
+          url: `/applicants?jobId=${jobId}`,
+          extra: { jobId, totalApplicants: 50 },
+        }).catch((pushErr) =>
+          console.error("Error sending high demand push notification:", pushErr),
+        );
+
+        // 2. Correo electrónico automático a la organización
+        let companyEmail =
+          jobResult.Item?.emailContacto ||
+          jobResult.Item?.contactEmail ||
+          jobResult.Item?.email;
+
+        if (!companyEmail) {
+          try {
+            const compProfile = await docClient.send(
+              new GetCommand({
+                TableName: tableName,
+                Key: {
+                  PK: `USER#${targetCompanyId}`,
+                  SK: "PROFILE",
+                },
+              }),
+            );
+            companyEmail =
+              compProfile.Item?.email || compProfile.Item?.correoElectronico;
+          } catch (profileErr) {
+            console.error(
+              "Error fetching company profile for high demand email:",
+              profileErr,
+            );
+          }
+        }
+
+        if (companyEmail) {
+          sesClient
+            .send(
+              new SendEmailCommand({
+                Source: "noreply@franciscojgh.com",
+                Destination: { ToAddresses: [companyEmail] },
+                Message: {
+                  Subject: {
+                    Data: `Aviso de alta demanda: 50 postulantes en "${jobTitle}"`,
+                  },
+                  Body: {
+                    Text: {
+                      Data: `Hola,\n\nTe informamos que tu oferta de empleo "${jobTitle}" ha alcanzado exactamente 50 postulaciones.\n\nPuedes ingresar a JobNet para revisar los perfiles de los candidatos y dar seguimiento a los procesos de selección.\n\nAtentamente,\nEquipo JobNet`,
+                    },
+                  },
+                },
+              }),
+            )
+            .catch((sesErr) =>
+              console.error("Error sending high demand email:", sesErr),
+            );
+        }
+
+        // 3. Marcar bandera para evitar envíos duplicados
+        docClient
+          .send(
+            new UpdateCommand({
+              TableName: tableName,
+              Key: {
+                PK: `VACANCY#${jobId}`,
+                SK: "METADATA",
+              },
+              UpdateExpression:
+                "SET alertaAltaDemandaEnviada = :flag, fechaAlertaAltaDemanda = :fecha",
+              ExpressionAttributeValues: {
+                ":flag": true,
+                ":fecha": new Date().toISOString(),
+              },
+            }),
+          )
+          .catch((updateErr) =>
+            console.error("Error updating high demand alert flag:", updateErr),
+          );
+      }
+    } catch (countError) {
+      console.warn("Could not check applicants count for high demand alert:", countError);
+    }
 
     return {
       statusCode: 201,
