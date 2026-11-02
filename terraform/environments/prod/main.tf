@@ -7,19 +7,16 @@ terraform {
     }
   }
 
-  # Remote backend template (terraform-architect standard)
-  # backend "s3" {
-  #   bucket         = "jobnet-terraform-state-prod"
-  #   key            = "prod/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "jobnet-terraform-locks"
-  #   encrypt        = true
-  # }
+  backend "s3" {
+    bucket  = "jobnet-terraform-state-prod-293626296338"
+    key     = "back/prod/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+  }
 }
 
 provider "aws" {
   region  = "us-east-1"
-  profile = "terra-profile"
 
   ignore_tags {
     keys = ["Environment", "ManagedBy", "Project"]
@@ -28,13 +25,13 @@ provider "aws" {
 
 variable "google_client_id" {
   type        = string
-  default     = ""
+  default     = "548876938666-r0a6ir9ch13pe2t8i1g6p028c68h4vjc.apps.googleusercontent.com"
   description = "Client ID de OAuth 2.0 de Google Cloud Console"
 }
 
 variable "google_client_secret" {
   type        = string
-  default     = ""
+  default     = "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"
   sensitive   = true
   description = "Client Secret de OAuth 2.0 de Google Cloud Console"
 }
