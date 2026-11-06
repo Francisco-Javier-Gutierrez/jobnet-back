@@ -28,6 +28,13 @@ provider:
         - OPTIONS
       allowCredentials: true
       maxAge: 3600
+    authorizers:
+      cognitoJwt:
+        type: jwt
+        identitySource: $request.header.Authorization
+        issuerUrl: https://cognito-idp.${self:provider.region}.amazonaws.com/${self:provider.environment.COGNITO_USER_POOL_ID}
+        audience:
+          - ${self:provider.environment.COGNITO_CLIENT_ID}
   environment:
     DYNAMODB_TABLE: jobnet-jobs-${self:provider.stage}
     S3_UPLOAD_BUCKET: jobnet-uploads-${self:provider.stage}
@@ -142,6 +149,8 @@ functions:
       - httpApi:
           path: /view-url
           method: get
+          authorizer:
+            name: cognitoJwt
   sendNotificationEmail:
     handler: src/handlers/jobs.sendNotificationEmail
     events:
@@ -180,12 +189,16 @@ functions:
       - httpApi:
           path: /chats/{jobId}/{candidateId}/messages
           method: get
+          authorizer:
+            name: cognitoJwt
   sendChatMessageHttp:
     handler: src/handlers/wsHandlers.sendChatMessageHttp
     events:
       - httpApi:
           path: /chats/{jobId}/{candidateId}/messages
           method: post
+          authorizer:
+            name: cognitoJwt
 
   getAuditLogs:
     handler: src/handlers/moderator.getAuditLogs
@@ -353,18 +366,24 @@ functions:
       - httpApi:
           path: /moderator/appeals/{id}/messages
           method: get
+          authorizer:
+            name: cognitoJwt
   joinAppeal:
     handler: src/handlers/moderator.joinAppeal
     events:
       - httpApi:
           path: /moderator/organizations/{id}/join-appeal
           method: post
+          authorizer:
+            name: cognitoJwt
   sendAppealMessageHttp:
     handler: src/handlers/wsHandlers.sendAppealMessageHttp
     events:
       - httpApi:
           path: /moderator/appeals/{id}/messages
           method: post
+          authorizer:
+            name: cognitoJwt
   getAppeals:
     handler: src/handlers/moderator.getAppeals
     events:

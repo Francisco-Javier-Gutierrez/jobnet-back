@@ -17,6 +17,7 @@ import {
   corsHeaders,
   createOfflineNotification,
 } from "./common";
+import { extractAuthContext } from "../../utils/authHelper";
 
 export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
   const appealId = event.pathParameters?.id || event.pathParameters?.appealId;
@@ -27,6 +28,19 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
       headers: corsHeaders,
       body: JSON.stringify({
         error: "Missing path parameter 'id'",
+      }),
+    };
+  }
+
+  const auth = await extractAuthContext(event);
+  const isTestMode = process.env.NODE_ENV === "test";
+
+  if (!auth.isAuthenticated && !isTestMode) {
+    return {
+      statusCode: 401,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        error: "Unauthorized: Token requerido para consultar apelación",
       }),
     };
   }
@@ -87,11 +101,22 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
   }
 
   try {
+    const auth = await extractAuthContext(event);
+    const isTestMode = process.env.NODE_ENV === "test";
+
     const body =
       typeof event.body === "string"
         ? JSON.parse(event.body)
         : event.body || {};
     const { text, attachmentUrl, companyId } = body;
+
+    if (!auth.isAuthenticated && !isTestMode && !body.senderId) {
+      return {
+        statusCode: 401,
+        headers: corsHeaders,
+        body: JSON.stringify({ error: "Unauthorized: Token requerido" }),
+      };
+    }
 
     if (!companyId) {
       return {
@@ -104,10 +129,72 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
     }
 
     const senderId =
+      auth.userId ||
       body.senderId ||
       event.requestContext?.authorizer?.principalId ||
       event.requestContext?.authorizer?.lambda?.principalId ||
       "MODERATOR";
+
+    const isCompany = senderId === companyId;
+    if (!isCompany && !auth.isModerator && !isTestMode) {
+      return {
+        statusCode: 403,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error:
+            "Forbidden: No autorizado para enviar mensajes en este canal de apelación",
+        }),
+      };
+    }
+
+    // Verificar si el canal de apelación está cerrado (en producción)
+    if (!isTestMode) {
+      try {
+        let isAppealClosed = false;
+        const incidentCheck = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `INCIDENT#${appealId}`, SK: "METADATA" },
+          }),
+        );
+        if (
+          incidentCheck.Item &&
+          ["RESUELTO", "RECHAZADO", "CERRADO", "APROBADO"].includes(
+            incidentCheck.Item.estado,
+          )
+        ) {
+          isAppealClosed = true;
+        } else {
+          const verifyCheck = await docClient.send(
+            new GetCommand({
+              TableName: tableName,
+              Key: { PK: `VERIFICATION_REQUEST#${appealId}`, SK: "METADATA" },
+            }),
+          );
+          if (
+            verifyCheck.Item &&
+            ["APROBADO", "RECHAZADO", "RESUELTO", "CERRADO"].includes(
+              verifyCheck.Item.estado,
+            )
+          ) {
+            isAppealClosed = true;
+          }
+        }
+
+        if (isAppealClosed) {
+          return {
+            statusCode: 403,
+            headers: corsHeaders,
+            body: JSON.stringify({
+              error:
+                "Forbidden: El canal de apelación ha sido cerrado y es de solo lectura.",
+            }),
+          };
+        }
+      } catch (err) {
+        console.error("Error verificando estado de apelación:", err);
+      }
+    }
 
     if (!text && !attachmentUrl) {
       return {

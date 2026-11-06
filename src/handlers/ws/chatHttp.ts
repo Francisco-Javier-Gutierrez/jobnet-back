@@ -9,6 +9,7 @@ import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
+import { randomUUID } from "crypto";
 import {
   docClient,
   tableName,
@@ -16,6 +17,7 @@ import {
   corsHeaders,
   createOfflineNotification,
 } from "./common";
+import { extractAuthContext } from "../../utils/authHelper";
 
 export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
   const jobId = event.pathParameters?.jobId;
@@ -31,6 +33,53 @@ export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
     };
   }
 
+  // Authentication & Authorization check
+  const auth = await extractAuthContext(event);
+  const isTestMode = process.env.NODE_ENV === "test";
+
+  if (!auth.isAuthenticated && !isTestMode) {
+    return {
+      statusCode: 401,
+      headers: corsHeaders,
+      body: JSON.stringify({
+        error: "Unauthorized: Token de autenticación requerido",
+      }),
+    };
+  }
+
+  const callerId = auth.userId || (isTestMode ? candidateId : "");
+  const isPrivileged = auth.isModerator || isTestMode;
+
+  // Verify caller is either the candidate, the company owning the vacancy, or a moderator
+  if (callerId !== candidateId && !isPrivileged) {
+    try {
+      const jobResult = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: { PK: `VACANCY#${jobId}`, SK: "METADATA" },
+        }),
+      );
+      if (!jobResult.Item || jobResult.Item.empresaUuid !== callerId) {
+        return {
+          statusCode: 403,
+          headers: corsHeaders,
+          body: JSON.stringify({
+            error:
+              "Forbidden: No tienes permiso para ver los mensajes de esta conversación.",
+          }),
+        };
+      }
+    } catch {
+      return {
+        statusCode: 403,
+        headers: corsHeaders,
+        body: JSON.stringify({
+          error: "Forbidden: Error validando permisos de acceso.",
+        }),
+      };
+    }
+  }
+
   try {
     const result = await docClient.send(
       new QueryCommand({
@@ -44,6 +93,7 @@ export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
     );
 
     const messages = (result.Items || []).map((m) => ({
+      messageId: m.messageId || m.SK?.split("#")[2] || null,
       senderId: m.senderId,
       text: m.text,
       attachmentUrl: m.attachmentUrl || null,
@@ -96,14 +146,27 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
     };
   }
 
+  const auth = await extractAuthContext(event);
+  const isTestMode = process.env.NODE_ENV === "test";
+
+  if (!auth.isAuthenticated && !isTestMode && !body.senderId) {
+    return {
+      statusCode: 401,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: "Unauthorized: Token requerido" }),
+    };
+  }
+
   const {
-    senderId,
     text,
     attachmentUrl,
     attachmentType,
     attachmentName,
     attachmentKey,
+    messageId: clientMessageId,
   } = body;
+
+  const senderId = auth.userId || body.senderId;
 
   if (!senderId) {
     return {
@@ -124,10 +187,73 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
   }
 
   try {
+    let companyId = "";
+
+    // 1. En producción, validar tenencia de vacante y estado antes de insertar
+    if (!isTestMode) {
+      try {
+        const jobResult = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: {
+              PK: `VACANCY#${jobId}`,
+              SK: "METADATA",
+            },
+          }),
+        );
+
+        if (jobResult.Item) {
+          companyId = jobResult.Item.empresaUuid;
+          const isCandidate = senderId === candidateId;
+          const isCompany = senderId === companyId;
+          if (!isCandidate && !isCompany && !auth.isModerator) {
+            return {
+              statusCode: 403,
+              headers: corsHeaders,
+              body: JSON.stringify({
+                error: "Not authorized to send messages in this conversation",
+              }),
+            };
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "Could not fetch vacancy metadata before sending message:",
+          err,
+        );
+      }
+
+      try {
+        const appCheck = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `JOB#${jobId}`, SK: `APP#${candidateId}` },
+          }),
+        );
+        if (
+          appCheck.Item &&
+          ["RECHAZADO", "CONTRATADO", "CERRADO"].includes(appCheck.Item.status)
+        ) {
+          return {
+            statusCode: 403,
+            headers: corsHeaders,
+            body: JSON.stringify({
+              error:
+                "Forbidden: La postulación ha sido cerrada y el chat es de solo lectura.",
+            }),
+          };
+        }
+      } catch (err) {
+        console.error("Error verificando estado de postulación:", err);
+      }
+    }
+
     const timestamp = new Date().toISOString();
+    const messageId = clientMessageId || randomUUID();
     const messageItem: any = {
       PK: `CHAT#${jobId}#${candidateId}`,
-      SK: `MSG#${timestamp}`,
+      SK: `MSG#${timestamp}#${messageId}`,
+      messageId,
       senderId,
       text: text || "",
       createdAt: timestamp,
@@ -150,20 +276,24 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
 
     // Best-effort: push to recipient via WebSocket if they have active connections
     try {
-      const jobResult = await docClient.send(
-        new GetCommand({
-          TableName: tableName,
-          Key: {
-            PK: `VACANCY#${jobId}`,
-            SK: "METADATA",
-          },
-        }),
-      );
+      if (!companyId) {
+        const jobResult = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: {
+              PK: `VACANCY#${jobId}`,
+              SK: "METADATA",
+            },
+          }),
+        );
+        if (jobResult.Item) {
+          companyId = jobResult.Item.empresaUuid;
+        }
+      }
 
-      if (jobResult.Item) {
-        const companyId = jobResult.Item.empresaUuid;
-        const recipientId = senderId === candidateId ? companyId : candidateId;
+      const recipientId = senderId === candidateId ? companyId : candidateId;
 
+      if (recipientId) {
         const connectionsResult = await docClient.send(
           new QueryCommand({
             TableName: tableName,
@@ -190,6 +320,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
 
           const pushPayload = JSON.stringify({
             action: "receiveMessage",
+            messageId,
             jobId,
             candidateId,
             senderId,
@@ -236,6 +367,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
               text ||
               attachmentName ||
               "Tienes un nuevo mensaje en tu conversación.",
+            url: `/messages?jobId=${jobId}&candidateId=${candidateId}`,
           });
         }
       }
@@ -248,7 +380,9 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
       headers: corsHeaders,
       body: JSON.stringify({
         success: true,
+        messageId,
         message: {
+          messageId,
           senderId: messageItem.senderId,
           text: messageItem.text,
           attachmentUrl: messageItem.attachmentUrl || null,

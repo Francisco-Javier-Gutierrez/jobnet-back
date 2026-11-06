@@ -35,10 +35,12 @@ export const createOfflineNotification = async ({
   userId,
   title,
   message,
+  url,
 }: {
   userId: string;
   title: string;
   message: string;
+  url?: string;
 }) => {
   try {
     const timestamp = new Date().toISOString();
@@ -60,6 +62,7 @@ export const createOfflineNotification = async ({
           message: bodyText,
           createdAt: timestamp,
           read: false,
+          targetUrl: url || "/notifications",
         },
       }),
     );
@@ -69,7 +72,7 @@ export const createOfflineNotification = async ({
       await sendPushToUser(userId, {
         title: title || "JobNet",
         body: bodyText,
-        url: "/notifications",
+        url: url || "/notifications",
       });
     } catch (pushErr) {
       console.error(
