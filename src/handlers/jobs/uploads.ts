@@ -3,6 +3,7 @@ import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
 import { s3Client, sesClient, bucketName, headers } from "./common";
+import { extractAuthContext } from "../../utils/authHelper";
 
 export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
   try {
@@ -74,6 +75,21 @@ export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
             };
           }
         }
+      }
+    }
+
+    if (folder === "chat" || folder === "appeal") {
+      const allowedChatExts = ["jpg", "jpeg", "png", "webp", "gif", "pdf"];
+      const finalExt = parts[parts.length - 1];
+      if (!allowedChatExts.includes(finalExt)) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error:
+              "Formato de archivo no permitido en chat. Solo se admiten PDF o imágenes (JPG, PNG, WebP, GIF).",
+          }),
+        };
       }
     }
 
@@ -179,6 +195,20 @@ export const getViewPresignedUrl: APIGatewayProxyHandler = async (event) => {
       }
     }
 
+    const auth = await extractAuthContext(event);
+    const isTestMode = process.env.NODE_ENV === "test";
+
+    if (!auth.isAuthenticated && !isTestMode) {
+      return {
+        statusCode: 401,
+        headers,
+        body: JSON.stringify({
+          error:
+            "No autenticado. Token requerido para ver o descargar archivos.",
+        }),
+      };
+    }
+
     if (!key) {
       return {
         statusCode: 400,
@@ -217,4 +247,3 @@ export const getViewPresignedUrl: APIGatewayProxyHandler = async (event) => {
     };
   }
 };
-

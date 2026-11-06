@@ -69,7 +69,6 @@ export const handler = async (event: any) => {
     const customRole = (
       payload["custom:role"] ||
       payload["custom:tipoUsuario"] ||
-      (event as any).queryStringParameters?.role ||
       ""
     )
       .toString()

@@ -301,9 +301,41 @@ export const sendMessage = async (event: any) => {
     }
 
     const timestamp = new Date().toISOString();
+    const messageId = clientMessageId || randomUUID();
+
+    // Idempotency check: skip if this messageId was already persisted
+    if (clientMessageId) {
+      const dupCheck = await docClient.send(
+        new QueryCommand({
+          TableName: tableName,
+          KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+          FilterExpression: "messageId = :mid",
+          ExpressionAttributeValues: {
+            ":pk": `CHAT#${jobId}#${candidateId}`,
+            ":skPrefix": "MSG#",
+            ":mid": clientMessageId,
+          },
+          Limit: 1,
+          ScanIndexForward: false,
+        }),
+      );
+      if (dupCheck.Items && dupCheck.Items.length > 0) {
+        console.log(`Duplicate chat messageId=${clientMessageId} skipped.`);
+        return {
+          statusCode: 200,
+          body: JSON.stringify({
+            message: "Duplicate message skipped",
+            duplicate: true,
+            item: dupCheck.Items[0],
+          }),
+        };
+      }
+    }
+
     const messageItem: any = {
       PK: `CHAT#${jobId}#${candidateId}`,
-      SK: `MSG#${timestamp}`,
+      SK: `MSG#${timestamp}#${messageId}`,
+      messageId,
       senderId,
       text: text || "",
       createdAt: timestamp,
@@ -355,6 +387,7 @@ export const sendMessage = async (event: any) => {
             Data: Buffer.from(
               JSON.stringify({
                 action: "receiveMessage",
+                messageId,
                 jobId,
                 candidateId,
                 senderId,
@@ -408,6 +441,7 @@ export const sendMessage = async (event: any) => {
           text ||
           attachmentName ||
           "Tienes un nuevo mensaje en tu conversación.",
+        url: `/messages?jobId=${jobId}&candidateId=${candidateId}`,
       });
     }
 
