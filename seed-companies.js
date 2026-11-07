@@ -25,8 +25,7 @@ const companies = [
     razonSocial: "InnovaTech Global Solutions S. de R.L.",
     logo: "https://images.unsplash.com/photo-1542744094-3a31b272c490?w=150&auto=format&fit=crop&q=80",
     sector: "Inteligencia Artificial & Ciencia de Datos",
-    biografia:
-      "Líder en soluciones de inteligencia artificial aplicada a finanzas y retail.",
+    biografia: "Líder en soluciones de inteligencia artificial aplicada a finanzas y retail.",
     organizacionVerificada: true,
     ubicacion: "Guadalajara, JAL, MX",
     email: "hello@innovatech.global",
@@ -47,8 +46,7 @@ const companies = [
     razonSocial: "Laboratorios BioSalud Innovación S.A.",
     logo: "https://images.unsplash.com/photo-1532938911079-1b06ac7ceec7?w=150&auto=format&fit=crop&q=80",
     sector: "Biotecnología y Salud",
-    biografia:
-      "Desarrollo de biotecnología avanzada y equipamiento médico inteligente.",
+    biografia: "Desarrollo de biotecnología avanzada y equipamiento médico inteligente.",
     organizacionVerificada: false,
     ubicacion: "Querétaro, QRO, MX",
     email: "talento@biosalud.mx",
@@ -58,8 +56,7 @@ const companies = [
     razonSocial: "Starlight Cargo & Supply Chain S.A. de C.V.",
     logo: "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=150&auto=format&fit=crop&q=80",
     sector: "Logística y Cadena de Suministro",
-    biografia:
-      "Operaciones logísticas internacionales con seguimiento automatizado e IoT.",
+    biografia: "Operaciones logísticas internacionales con seguimiento automatizado e IoT.",
     organizacionVerificada: true,
     ubicacion: "Puebla, PUE, MX",
     email: "careers@starlightlogistics.com",
@@ -69,8 +66,7 @@ const companies = [
     razonSocial: "Pixel Code Digital Agency S.C.",
     logo: "https://images.unsplash.com/photo-1572021335469-31706a17aaef?w=150&auto=format&fit=crop&q=80",
     sector: "Diseño UX/UI & Marketing Digital",
-    biografia:
-      "Estudio creativo centrado en experiencia de usuario y desarrollo web a medida.",
+    biografia: "Estudio creativo centrado en experiencia de usuario y desarrollo web a medida.",
     organizacionVerificada: false,
     ubicacion: "Mérida, YUC, MX",
     email: "jobs@pixelcode.studio",
@@ -91,9 +87,7 @@ async function seed() {
       updatedAt: now,
       estadoCuenta: "ACTIVO",
       estatus: "Activa",
-      estatusVerificacion: company.organizacionVerificada
-        ? "Verificada"
-        : "Pendiente",
+      estatusVerificacion: company.organizacionVerificada ? "Verificada" : "Pendiente",
       ...company,
     };
 

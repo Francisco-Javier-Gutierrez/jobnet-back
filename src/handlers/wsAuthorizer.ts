@@ -3,9 +3,7 @@ import { CognitoJwtVerifier } from "aws-jwt-verify";
 export const getVerifier = () => {
   const userPoolId = process.env.COGNITO_USER_POOL_ID;
   const isLocal =
-    userPoolId === "us-east-1_local" ||
-    !userPoolId ||
-    process.env.IS_OFFLINE === "true";
+    userPoolId === "us-east-1_local" || !userPoolId || process.env.IS_OFFLINE === "true";
 
   if (isLocal) {
     return null;
@@ -58,35 +56,25 @@ export const handler = async (event: any) => {
     const payload = await verifier.verify(token);
 
     // Scopes from OAuth 2.0 Access Token (represented as space-delimited string or array in 'scope' / 'scp')
-    const rawScope = ((payload as any).scope || (payload as any).scp || "") as
-      string | string[];
+    const rawScope = ((payload as any).scope || (payload as any).scp || "") as string | string[];
     const scopes: string[] = Array.isArray(rawScope)
       ? rawScope
       : typeof rawScope === "string"
         ? rawScope.split(" ").filter(Boolean)
         : [];
 
-    const customRole = (
-      payload["custom:role"] ||
-      payload["custom:tipoUsuario"] ||
-      ""
-    )
+    const customRole = (payload["custom:role"] || payload["custom:tipoUsuario"] || "")
       .toString()
       .toUpperCase();
 
     // Check scopes (e.g. 'jobnet/admin', 'jobnet/moderator', 'admin', 'moderator')
     const hasAdminScope = scopes.some((s) => s.toLowerCase().includes("admin"));
     const hasModScope = scopes.some(
-      (s) =>
-        s.toLowerCase().includes("moderator") ||
-        s.toLowerCase().includes("mod"),
+      (s) => s.toLowerCase().includes("moderator") || s.toLowerCase().includes("mod"),
     );
 
     const isMod =
-      customRole === "ADMIN" ||
-      customRole === "MODERATOR" ||
-      hasAdminScope ||
-      hasModScope;
+      customRole === "ADMIN" || customRole === "MODERATOR" || hasAdminScope || hasModScope;
 
     const role = isMod ? "MODERATOR" : "USER";
 

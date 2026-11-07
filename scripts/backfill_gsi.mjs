@@ -1,9 +1,5 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-  DynamoDBDocumentClient,
-  ScanCommand,
-  BatchWriteCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 
 // Configurar el uso del perfil terra-profile
 process.env.AWS_PROFILE = "terra-profile";
@@ -14,9 +10,7 @@ const docClient = DynamoDBDocumentClient.from(client);
 const TABLE_NAME = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 
 async function run() {
-  console.log(
-    `Starting backfill on table: ${TABLE_NAME} using profile: terra-profile`,
-  );
+  console.log(`Starting backfill on table: ${TABLE_NAME} using profile: terra-profile`);
   let lastEvaluatedKey = undefined;
   let itemsToUpdate = [];
   let updatedCount = 0;

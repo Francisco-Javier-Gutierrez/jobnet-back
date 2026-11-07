@@ -1,17 +1,7 @@
-import {
-  PostConfirmationTriggerEvent,
-  PostConfirmationTriggerHandler,
-} from "aws-lambda";
+import { PostConfirmationTriggerEvent, PostConfirmationTriggerHandler } from "aws-lambda";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-  DynamoDBDocumentClient,
-  PutCommand,
-  GetCommand,
-} from "@aws-sdk/lib-dynamodb";
-import {
-  isCorporateEmailDomain,
-  isBlockedFraudDomain,
-} from "../utils/domainVerifier";
+import { DynamoDBDocumentClient, PutCommand, GetCommand } from "@aws-sdk/lib-dynamodb";
+import { isCorporateEmailDomain, isBlockedFraudDomain } from "../utils/domainVerifier";
 
 const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -31,10 +21,7 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient);
 export const handler: PostConfirmationTriggerHandler = async (
   event: PostConfirmationTriggerEvent,
 ) => {
-  console.log(
-    "PostConfirmation Trigger Event:",
-    JSON.stringify(event, null, 2),
-  );
+  console.log("PostConfirmation Trigger Event:", JSON.stringify(event, null, 2));
 
   const userAttributes = event.request.userAttributes;
   const email = userAttributes.email;
@@ -68,7 +55,10 @@ export const handler: PostConfirmationTriggerHandler = async (
     event.userName?.toLowerCase().startsWith("google_") ||
     Boolean(userAttributes.identities && userAttributes.identities.includes("Google"));
 
-  if (isGoogleFederated && (!normalizedRole || normalizedRole === "candidate" || normalizedRole === "candidato")) {
+  if (
+    isGoogleFederated &&
+    (!normalizedRole || normalizedRole === "candidate" || normalizedRole === "candidato")
+  ) {
     tipoUsuario = "CANDIDATO";
   } else if (isAspirant) {
     tipoUsuario = "PENDIENTE";
@@ -120,8 +110,7 @@ export const handler: PostConfirmationTriggerHandler = async (
         ? "Moderador"
         : "Administrador";
     const detectedSolicitud =
-      solicitudRol ||
-      (normalizedRole.includes("mod") ? "MODERATOR" : "ADMIN");
+      solicitudRol || (normalizedRole.includes("mod") ? "MODERATOR" : "ADMIN");
     Object.assign(userItem, {
       fotoPerfil: "",
       solicitudRol: detectedSolicitud,
@@ -135,10 +124,7 @@ export const handler: PostConfirmationTriggerHandler = async (
       ubicacion: {},
     });
   } else if (tipoUsuario === "ORGANIZACION") {
-    const domain =
-      email && email.includes("@")
-        ? email.split("@")[1].toLowerCase().trim()
-        : "";
+    const domain = email && email.includes("@") ? email.split("@")[1].toLowerCase().trim() : "";
     const isAutoVerified = isCorporateEmailDomain(domain);
 
     const rfcVal =
@@ -157,9 +143,7 @@ export const handler: PostConfirmationTriggerHandler = async (
       event.request.clientMetadata?.nombre ||
       "";
     const telefonoVal =
-      event.request.clientMetadata?.telefono ||
-      userAttributes["phone_number"] ||
-      "";
+      event.request.clientMetadata?.telefono || userAttributes["phone_number"] || "";
 
     Object.assign(userItem, {
       taxId: rfcVal,
@@ -173,9 +157,7 @@ export const handler: PostConfirmationTriggerHandler = async (
       ubicacion: {},
       organizacionVerificada: isAutoVerified,
       estatusVerificacion: isAutoVerified ? "VERIFICADA" : "PENDIENTE",
-      metodoVerificacion: isAutoVerified
-        ? "AUTOMATICO_DOMINIO_CORPORATIVO"
-        : "MANUAL_PENDIENTE",
+      metodoVerificacion: isAutoVerified ? "AUTOMATICO_DOMINIO_CORPORATIVO" : "MANUAL_PENDIENTE",
       dominioCorporativo: domain || "",
       fechaVerificacion: isAutoVerified ? new Date().toISOString() : null,
     });
@@ -217,10 +199,7 @@ export const handler: PostConfirmationTriggerHandler = async (
         );
       }
     } catch (err: any) {
-      if (
-        err.message &&
-        (err.message.includes("RF-74") || err.message.includes("RN-3"))
-      ) {
+      if (err.message && (err.message.includes("RF-74") || err.message.includes("RN-3"))) {
         console.error("Registro bloqueado por RN-3/RF-74:", err.message);
         throw err;
       }

@@ -148,9 +148,7 @@ export function enrichJobItem(
   const applicationData = appliedJobsMap ? appliedJobsMap.get(id) : null;
   const isBookmarked = bookmarkedJobIds ? bookmarkedJobIds.has(id) : false;
 
-  const isSalaryConfidential = Boolean(
-    item.salarioConfidencial || item.isSalaryConfidential,
-  );
+  const isSalaryConfidential = Boolean(item.salarioConfidencial || item.isSalaryConfidential);
   const preguntasFiltro = Array.isArray(item.preguntasFiltro)
     ? item.preguntasFiltro
     : Array.isArray(item.screeningQuestions)
@@ -169,9 +167,7 @@ export function enrichJobItem(
     item.fechaCierre ||
     item.fechaVigencia ||
     new Date(new Date(createdAt).getTime() + 30 * ONE_DAY_MS).toISOString();
-  const diasParaVencer = Math.ceil(
-    (new Date(fechaCierre).getTime() - Date.now()) / ONE_DAY_MS,
-  );
+  const diasParaVencer = Math.ceil((new Date(fechaCierre).getTime() - Date.now()) / ONE_DAY_MS);
 
   const enriched: EnrichedJobItem = {
     ...item,
@@ -253,10 +249,8 @@ export function enrichProfileItem(item: any): any {
     habilidades,
     habilidadesCertificadas,
     portafolio,
-    documentosAdicionales:
-      item.documentosAdicionales || item.documentosProfesionales || [],
-    documentosProfesionales:
-      item.documentosProfesionales || item.documentosAdicionales || [],
+    documentosAdicionales: item.documentosAdicionales || item.documentosProfesionales || [],
+    documentosProfesionales: item.documentosProfesionales || item.documentosAdicionales || [],
     links:
       item.links ||
       (item.enlacesWeb && typeof item.enlacesWeb === "object"

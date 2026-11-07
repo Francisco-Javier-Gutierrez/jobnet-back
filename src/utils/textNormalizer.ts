@@ -155,15 +155,11 @@ export function normalizeForModeration(rawText: string): {
   processed = collapseRepeatedChars(processed);
 
   // 5. Eliminar símbolos/puntuación de evasión incrustados entre letras (ej: p*u*t*o -> puto, s.y.b.a.u -> sybau)
-  processed = processed.replace(
-    /([a-z0-9ñ])[._\-*#/\\~^'`"|?!,]+(?=[a-z0-9ñ])/gi,
-    "$1",
-  );
+  processed = processed.replace(/([a-z0-9ñ])[._\-*#/\\~^'`"|?!,]+(?=[a-z0-9ñ])/gi, "$1");
 
   // 6. Colapsar secuencias de letras individuales separadas por espacios (ej: "p u t o" -> "puto", "s y b a u" -> "sybau")
-  processed = processed.replace(
-    /(?:^|\s)([a-z0-9ñ]\s+){2,}[a-z0-9ñ](?=\s|$)/gi,
-    (match) => match.replace(/\s+/g, ""),
+  processed = processed.replace(/(?:^|\s)([a-z0-9ñ]\s+){2,}[a-z0-9ñ](?=\s|$)/gi, (match) =>
+    match.replace(/\s+/g, ""),
   );
 
   // 7. Versión normalizada con espacios limpios

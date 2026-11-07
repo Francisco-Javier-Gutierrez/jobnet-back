@@ -45,11 +45,7 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import {
-  getJobApplicants,
-  getMyApplications,
-  updateApplicationStatus,
-} from "./management";
+import { getJobApplicants, getMyApplications, updateApplicationStatus } from "./management";
 
 describe("applications management handlers", () => {
   beforeEach(() => {
@@ -62,11 +58,7 @@ describe("applications management handlers", () => {
 
   describe("getJobApplicants", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getJobApplicants(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getJobApplicants({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 

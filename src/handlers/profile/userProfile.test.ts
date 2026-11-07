@@ -38,21 +38,13 @@ describe("user profile handlers", () => {
 
   describe("getProfile", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getProfile(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfile({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
     it("should return 404 if profile not found", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Item: null });
-      const res = await getProfile(
-        { pathParameters: { id: "u-999" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfile({ pathParameters: { id: "u-999" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(404);
     });
 
@@ -66,11 +58,7 @@ describe("user profile handlers", () => {
         },
       });
 
-      const res = await getProfile(
-        { pathParameters: { id: "u-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfile({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.body);
       expect(data.nombre).toBe("Alice");
@@ -79,23 +67,50 @@ describe("user profile handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Profile DB error"));
-      const res = await getProfile(
-        { pathParameters: { id: "u-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfile({ pathParameters: { id: "u-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("updateProfile", () => {
     it("should return 400 if id is missing", async () => {
+      const res = await updateProfile({ pathParameters: {} } as any, {} as any, () => {});
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("should return 400 on malformed JSON body", async () => {
       const res = await updateProfile(
-        { pathParameters: {} } as any,
+        { pathParameters: { id: "u-1" }, body: "invalid{json" } as any,
         {} as any,
         () => {},
       );
       expect(res.statusCode).toBe(400);
+      const parsed = JSON.parse(res.body);
+      expect(parsed.code).toBe("INVALID_JSON");
+    });
+
+    it("should return 400 if id contains invalid characters like #", async () => {
+      const res = await updateProfile(
+        { pathParameters: { id: "u#1" }, body: "{}" } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("should return 403 if caller is unauthenticated (no callerId)", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { PK: "USER#u-1", SK: "PROFILE" },
+      });
+
+      const event = {
+        pathParameters: { id: "u-1" },
+        headers: {},
+        body: JSON.stringify({ nombre: "Hacked" }),
+      } as any;
+
+      const res = await updateProfile(event, {} as any, () => {});
+      expect(res.statusCode).toBe(403);
     });
 
     it("should return 403 if caller is not owner and not privileged", async () => {

@@ -1,13 +1,10 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  PutCommand,
-  QueryCommand,
-  GetCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { PutCommand, QueryCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
 import { docClient, sesClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
+import { parseJsonBody, safeIdSchema } from "../../utils/validator";
+import { extractAuthContext } from "../../utils/authHelper";
 
 /**
  * POST /jobs/{id}/apply
@@ -19,22 +16,40 @@ import { createUserNotification } from "../../utils/webPushService";
 export const applyToJob: APIGatewayProxyHandler = async (event) => {
   try {
     const jobId = event.pathParameters?.id;
-    if (!jobId) {
+    if (!jobId || !safeIdSchema.safeParse(jobId).success) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing path parameter 'id'" }),
+        body: JSON.stringify({
+          error: "Missing or invalid path parameter 'id'",
+        }),
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
-    const { candidateId, coverLetter } = body;
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
+    const auth = await extractAuthContext(event);
+    const candidateId = auth.userId || body.candidateId;
+    const { coverLetter } = body;
 
-    if (!candidateId) {
+    if (!candidateId || !safeIdSchema.safeParse(candidateId).success) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: "Missing required field 'candidateId'" }),
+      };
+    }
+
+    if (coverLetter && typeof coverLetter === "string" && coverLetter.length > 5000) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "La carta de presentación no debe exceder los 5000 caracteres.",
+        }),
       };
     }
 
@@ -65,8 +80,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
           statusCode: 400,
           headers,
           body: JSON.stringify({
-            error:
-              "Esta vacante se encuentra pausada temporalmente por la organización.",
+            error: "Esta vacante se encuentra pausada temporalmente por la organización.",
           }),
         };
       }
@@ -90,8 +104,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
             statusCode: 400,
             headers,
             body: JSON.stringify({
-              error:
-                "Se ha alcanzado el límite máximo de postulantes para esta vacante.",
+              error: "Se ha alcanzado el límite máximo de postulantes para esta vacante.",
             }),
           };
         }
@@ -99,9 +112,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
 
       // Validate required screening questions (preguntas filtro)
       const screeningQuestions: string[] =
-        jobResult.Item.preguntasFiltro ||
-        jobResult.Item.screeningQuestions ||
-        [];
+        jobResult.Item.preguntasFiltro || jobResult.Item.screeningQuestions || [];
       if (screeningQuestions.length > 0) {
         const respuestasFiltro = body.respuestasFiltro;
         let hasMissingAnswers = false;
@@ -113,7 +124,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
             const match = respuestasFiltro.find(
               (r: any) =>
                 (typeof r === "object" && r?.pregunta === q && r?.respuesta?.trim()) ||
-                (typeof r === "string" && r.trim().length > 0)
+                (typeof r === "string" && r.trim().length > 0),
             );
             if (!match) {
               hasMissingAnswers = true;
@@ -201,10 +212,8 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
     );
 
     // Disparar Notificaciones Push y almacenar en DynamoDB
-    const targetCompanyId =
-      jobResult.Item?.empresaUuid || jobResult.Item?.companyId;
-    const jobTitle =
-      jobResult.Item?.titulo || jobResult.Item?.title || "tu vacante";
+    const targetCompanyId = jobResult.Item?.empresaUuid || jobResult.Item?.companyId;
+    const jobTitle = jobResult.Item?.titulo || jobResult.Item?.title || "tu vacante";
 
     if (targetCompanyId) {
       createUserNotification({
@@ -214,9 +223,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
         type: "application",
         url: "/vacancies",
         extra: { jobId, candidateId },
-      }).catch((err) =>
-        console.error("Error creating employer notification:", err),
-      );
+      }).catch((err) => console.error("Error creating employer notification:", err));
     }
 
     createUserNotification({
@@ -226,9 +233,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       type: "application",
       url: "/candidate/my-applications",
       extra: { jobId },
-    }).catch((err) =>
-      console.error("Error creating candidate notification:", err),
-    );
+    }).catch((err) => console.error("Error creating candidate notification:", err));
 
     // Consulta de conteo para Alerta de Alta Demanda (exactamente a los 50 postulantes)
     try {
@@ -245,11 +250,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       );
       const totalApplicants = countRes.Count ?? (countRes.Items || []).length;
 
-      if (
-        totalApplicants === 50 &&
-        !jobResult.Item?.alertaAltaDemandaEnviada &&
-        targetCompanyId
-      ) {
+      if (totalApplicants === 50 && !jobResult.Item?.alertaAltaDemandaEnviada && targetCompanyId) {
         // 1. Notificación push en la plataforma
         createUserNotification({
           userId: targetCompanyId,
@@ -264,9 +265,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
 
         // 2. Correo electrónico automático a la organización
         let companyEmail =
-          jobResult.Item?.emailContacto ||
-          jobResult.Item?.contactEmail ||
-          jobResult.Item?.email;
+          jobResult.Item?.emailContacto || jobResult.Item?.contactEmail || jobResult.Item?.email;
 
         if (!companyEmail) {
           try {
@@ -279,13 +278,9 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
                 },
               }),
             );
-            companyEmail =
-              compProfile.Item?.email || compProfile.Item?.correoElectronico;
+            companyEmail = compProfile.Item?.email || compProfile.Item?.correoElectronico;
           } catch (profileErr) {
-            console.error(
-              "Error fetching company profile for high demand email:",
-              profileErr,
-            );
+            console.error("Error fetching company profile for high demand email:", profileErr);
           }
         }
 
@@ -307,9 +302,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
                 },
               }),
             )
-            .catch((sesErr) =>
-              console.error("Error sending high demand email:", sesErr),
-            );
+            .catch((sesErr) => console.error("Error sending high demand email:", sesErr));
         }
 
         // 3. Marcar bandera para evitar envíos duplicados
@@ -329,9 +322,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
               },
             }),
           )
-          .catch((updateErr) =>
-            console.error("Error updating high demand alert flag:", updateErr),
-          );
+          .catch((updateErr) => console.error("Error updating high demand alert flag:", updateErr));
       }
     } catch (countError) {
       console.warn("Could not check applicants count for high demand alert:", countError);

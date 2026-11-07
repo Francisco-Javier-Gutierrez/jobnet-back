@@ -2,17 +2,13 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { QueryCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName, headers } from "../jobs/common";
 import { detectAnomalousConcurrency } from "../../utils/anomalyDetector";
+import { extractAuthContext } from "../../utils/authHelper";
 
 export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
   try {
-    // 1. Role verification: ONLY ADMIN allowed
-    const userRole = (
-      event.headers["x-user-role"] ||
-      event.headers["X-User-Role"] ||
-      ""
-    ).toUpperCase();
-
-    if (userRole !== "ADMIN") {
+    // 1. Role verification: ONLY ADMIN allowed via verified auth context
+    const auth = await extractAuthContext(event);
+    if (!auth.isAdmin) {
       return {
         statusCode: 403,
         headers,
@@ -131,9 +127,15 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
       if (rawLoc.toLowerCase().includes("toluca")) regionName = "Toluca";
       else if (rawLoc.toLowerCase().includes("metepec")) regionName = "Metepec";
       else if (rawLoc.toLowerCase().includes("naucalpan")) regionName = "Naucalpan";
-      else if (rawLoc.toLowerCase().includes("cdmx") || rawLoc.toLowerCase().includes("ciudad de méxico")) regionName = "Ciudad de México";
-      else if (rawLoc.toLowerCase().includes("querétaro") || rawLoc.toLowerCase().includes("qro")) regionName = "Querétaro";
-      else if (rawLoc.toLowerCase().includes("remoto") || vac.modalidad === "Remoto") regionName = "Remoto Nacional";
+      else if (
+        rawLoc.toLowerCase().includes("cdmx") ||
+        rawLoc.toLowerCase().includes("ciudad de méxico")
+      )
+        regionName = "Ciudad de México";
+      else if (rawLoc.toLowerCase().includes("querétaro") || rawLoc.toLowerCase().includes("qro"))
+        regionName = "Querétaro";
+      else if (rawLoc.toLowerCase().includes("remoto") || vac.modalidad === "Remoto")
+        regionName = "Remoto Nacional";
 
       availableRegions.add(regionName);
 
@@ -165,8 +167,7 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
         if (!regionalSkills[regionName]) {
           regionalSkills[regionName] = {};
         }
-        regionalSkills[regionName][normalized] =
-          (regionalSkills[regionName][normalized] || 0) + 1;
+        regionalSkills[regionName][normalized] = (regionalSkills[regionName][normalized] || 0) + 1;
       });
     });
 
@@ -181,16 +182,19 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
       { name: "Python / Data Science", count: 15, category: "Data / AI" },
       { name: "Git & CI/CD", count: 14, category: "DevOps" },
       { name: "Figma & UI Design", count: 12, category: "Diseño" },
-      { name: "SQL & Bases de Datos Relacionales", count: 10, category: "Database" },
+      {
+        name: "SQL & Bases de Datos Relacionales",
+        count: 10,
+        category: "Database",
+      },
     ];
 
     const sortedSkills = Object.entries(skillCounts)
       .map(([name, count]) => ({
         name,
         count,
-        percentage: filteredVacanciesCount > 0
-          ? Math.round((count / filteredVacanciesCount) * 100)
-          : 0,
+        percentage:
+          filteredVacanciesCount > 0 ? Math.round((count / filteredVacanciesCount) * 100) : 0,
         category: getSkillCategory(name),
       }))
       .sort((a, b) => b.count - a.count)
@@ -207,8 +211,18 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
     // 6. Aggregate Monthly Organizations Volume
     const monthCounts: Record<string, number> = {};
     const monthNames = [
-      "Ene", "Feb", "Mar", "Abr", "May", "Jun",
-      "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"
+      "Ene",
+      "Feb",
+      "Mar",
+      "Abr",
+      "May",
+      "Jun",
+      "Jul",
+      "Ago",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dic",
     ];
 
     orgItems.forEach((org) => {
@@ -240,9 +254,10 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
 
     const monthlyOrganizations = defaultMonthlySeries.map((item) => ({
       ...item,
-      count: monthCounts[item.month] !== undefined
-        ? Math.max(item.count, monthCounts[item.month])
-        : item.count,
+      count:
+        monthCounts[item.month] !== undefined
+          ? Math.max(item.count, monthCounts[item.month])
+          : item.count,
     }));
 
     // 7. Calculate Application Rate
@@ -286,10 +301,7 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
       console.warn("Could not query incidents for anomaly detection:", err);
     }
 
-    const finalAnomalies = detectAnomalousConcurrency(
-      vacanciesItems,
-      incidentItems,
-    );
+    const finalAnomalies = detectAnomalousConcurrency(vacanciesItems, incidentItems);
 
     const verifiedOrgsCount = orgItems.filter(
       (o) => o.organizacionVerificada || o.estatusVerificacion === "VERIFICADA",
@@ -338,25 +350,61 @@ export const getAdminAnalytics: APIGatewayProxyHandler = async (event) => {
 
 function getSkillCategory(skill: string): string {
   const s = skill.toLowerCase();
-  if (s.includes("vue") || s.includes("react") || s.includes("nuxt") || s.includes("angular") || s.includes("frontend") || s.includes("html") || s.includes("css")) {
+  if (
+    s.includes("vue") ||
+    s.includes("react") ||
+    s.includes("nuxt") ||
+    s.includes("angular") ||
+    s.includes("frontend") ||
+    s.includes("html") ||
+    s.includes("css")
+  ) {
     return "Frontend";
   }
   if (s.includes("aws") || s.includes("cloud") || s.includes("azure") || s.includes("gcp")) {
     return "Cloud";
   }
-  if (s.includes("node") || s.includes("express") || s.includes("java") || s.includes("spring") || s.includes("c#") || s.includes(".net") || s.includes("php")) {
+  if (
+    s.includes("node") ||
+    s.includes("express") ||
+    s.includes("java") ||
+    s.includes("spring") ||
+    s.includes("c#") ||
+    s.includes(".net") ||
+    s.includes("php")
+  ) {
     return "Backend";
   }
-  if (s.includes("docker") || s.includes("ci/cd") || s.includes("git") || s.includes("terraform") || s.includes("kubernetes") || s.includes("devops") || s.includes("linux")) {
+  if (
+    s.includes("docker") ||
+    s.includes("ci/cd") ||
+    s.includes("git") ||
+    s.includes("terraform") ||
+    s.includes("kubernetes") ||
+    s.includes("devops") ||
+    s.includes("linux")
+  ) {
     return "DevOps";
   }
-  if (s.includes("python") || s.includes("data") || s.includes("ai") || s.includes("machine") || s.includes("ia")) {
+  if (
+    s.includes("python") ||
+    s.includes("data") ||
+    s.includes("ai") ||
+    s.includes("machine") ||
+    s.includes("ia")
+  ) {
     return "Data / AI";
   }
   if (s.includes("figma") || s.includes("design") || s.includes("ui") || s.includes("ux")) {
     return "UI / UX";
   }
-  if (s.includes("sql") || s.includes("mongo") || s.includes("dynamo") || s.includes("postgres") || s.includes("database")) {
+  if (
+    s.includes("sql") ||
+    s.includes("mongo") ||
+    s.includes("dynamo") ||
+    s.includes("postgres") ||
+    s.includes("database")
+  ) {
     return "Base de Datos";
   }
   return "Tecnología";

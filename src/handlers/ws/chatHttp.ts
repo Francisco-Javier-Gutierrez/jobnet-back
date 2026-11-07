@@ -1,22 +1,11 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  PutCommand,
-  GetCommand,
-  QueryCommand,
-  DeleteCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { PutCommand, GetCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
 import { randomUUID } from "crypto";
-import {
-  docClient,
-  tableName,
-  isOffline,
-  corsHeaders,
-  createOfflineNotification,
-} from "./common";
+import { docClient, tableName, isOffline, corsHeaders, createOfflineNotification } from "./common";
 import { extractAuthContext } from "../../utils/authHelper";
 
 export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
@@ -64,8 +53,7 @@ export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
           statusCode: 403,
           headers: corsHeaders,
           body: JSON.stringify({
-            error:
-              "Forbidden: No tienes permiso para ver los mensajes de esta conversación.",
+            error: "Forbidden: No tienes permiso para ver los mensajes de esta conversación.",
           }),
         };
       }
@@ -116,9 +104,7 @@ export const getChatMessages: APIGatewayProxyHandler = async (event: any) => {
   }
 };
 
-export const sendChatMessageHttp: APIGatewayProxyHandler = async (
-  event: any,
-) => {
+export const sendChatMessageHttp: APIGatewayProxyHandler = async (event: any) => {
   const jobId = event.pathParameters?.jobId;
   const candidateId = event.pathParameters?.candidateId;
 
@@ -134,10 +120,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
 
   let body: any;
   try {
-    body =
-      typeof event.body === "string"
-        ? JSON.parse(event.body)
-        : event.body || {};
+    body = typeof event.body === "string" ? JSON.parse(event.body) : event.body || {};
   } catch {
     return {
       statusCode: 400,
@@ -217,10 +200,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
           }
         }
       } catch (err) {
-        console.warn(
-          "Could not fetch vacancy metadata before sending message:",
-          err,
-        );
+        console.warn("Could not fetch vacancy metadata before sending message:", err);
       }
 
       try {
@@ -238,8 +218,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
             statusCode: 403,
             headers: corsHeaders,
             body: JSON.stringify({
-              error:
-                "Forbidden: La postulación ha sido cerrada y el chat es de solo lectura.",
+              error: "Forbidden: La postulación ha sido cerrada y el chat es de solo lectura.",
             }),
           };
         }
@@ -363,10 +342,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (
           await createOfflineNotification({
             userId: recipientId,
             title: "Nuevo mensaje de chat",
-            message:
-              text ||
-              attachmentName ||
-              "Tienes un nuevo mensaje en tu conversación.",
+            message: text || attachmentName || "Tienes un nuevo mensaje en tu conversación.",
             url: `/messages?jobId=${jobId}&candidateId=${candidateId}`,
           });
         }

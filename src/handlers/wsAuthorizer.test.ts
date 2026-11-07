@@ -30,8 +30,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: null,
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -44,8 +43,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "dummy-local-token", role: "admin" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -59,8 +57,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "dummy-local-token" },
       headers: { "x-user-role": "candidate" },
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -79,8 +76,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: null,
       headers: { Authorization: "Bearer my-valid-access-token" },
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -100,8 +96,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "admin-access-token" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -120,8 +115,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "mod-access-token" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -139,8 +133,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "custom-token" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -158,8 +151,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "empresa-token" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -178,8 +170,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "weird-token" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -194,8 +185,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "local-token" },
       headers: undefined,
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
@@ -209,8 +199,7 @@ describe("wsAuthorizer handler", () => {
     const event = {
       queryStringParameters: { token: "invalid-token" },
       headers: {},
-      methodArn:
-        "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);

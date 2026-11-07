@@ -167,9 +167,7 @@ describe("jobs vacancies handlers", () => {
           },
         ],
       }); // Query vacancies
-      mockDynamoSend.mockRejectedValueOnce(
-        new Error("Enrichment query failed"),
-      ); // Catch in enrichedItems
+      mockDynamoSend.mockRejectedValueOnce(new Error("Enrichment query failed")); // Catch in enrichedItems
 
       const res = await getJobs(
         { queryStringParameters: { q: "Dev", modalidad: "Remoto" } } as any,
@@ -202,11 +200,7 @@ describe("jobs vacancies handlers", () => {
 
   describe("getJobById", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getJobById(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getJobById({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -278,11 +272,7 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Job get error"));
-      const res = await getJobById(
-        { pathParameters: { id: "job-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getJobById({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
     });
   });
@@ -374,24 +364,37 @@ describe("jobs vacancies handlers", () => {
       expect(mockDynamoSend).not.toHaveBeenCalled();
     });
 
-    it("should return 500 on database error", async () => {
-      mockDynamoSend.mockRejectedValueOnce(new Error("Create job error"));
+    it("should return 400 on malformed JSON body in createJob", async () => {
+      const res = await createJob({ body: "bad{json" } as any, {} as any, () => {});
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).code).toBe("INVALID_JSON");
+    });
+
+    it("should return 400 on negative salary in createJob", async () => {
       const res = await createJob(
-        { body: JSON.stringify({}) } as any,
+        {
+          body: JSON.stringify({
+            title: "Dev",
+            salarioMinimo: -500,
+          }),
+        } as any,
         {} as any,
         () => {},
       );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
+    });
+
+    it("should return 500 on database error", async () => {
+      mockDynamoSend.mockRejectedValueOnce(new Error("Create job error"));
+      const res = await createJob({ body: JSON.stringify({}) } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("updateJob", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await updateJob(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await updateJob({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -421,6 +424,31 @@ describe("jobs vacancies handlers", () => {
 
       const res = await updateJob(event, {} as any, () => {});
       expect(res.statusCode).toBe(403);
+    });
+
+    it("should return 403 if caller is unauthenticated (no headers / no callerId)", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: { PK: "VACANCY#job-1", empresaUuid: "owner-1" },
+      });
+
+      const event = {
+        pathParameters: { id: "job-1" },
+        headers: {},
+        body: JSON.stringify({ title: "Hacked Title" }),
+      } as any;
+
+      const res = await updateJob(event, {} as any, () => {});
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("should return 400 on malformed JSON body in updateJob", async () => {
+      const res = await updateJob(
+        { pathParameters: { id: "job-1" }, body: "malformed{json" } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).code).toBe("INVALID_JSON");
     });
 
     it("should return 400 if no valid fields provided to update", async () => {
@@ -501,22 +529,14 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Update job error"));
-      const res = await updateJob(
-        { pathParameters: { id: "job-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await updateJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
     });
   });
 
   describe("deleteJob", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await deleteJob(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await deleteJob({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -564,11 +584,7 @@ describe("jobs vacancies handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Delete job error"));
-      const res = await deleteJob(
-        { pathParameters: { id: "job-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await deleteJob({ pathParameters: { id: "job-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
     });
   });

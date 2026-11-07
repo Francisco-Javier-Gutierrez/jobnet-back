@@ -58,11 +58,7 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import {
-  openIncidentAudit,
-  getIncidentAuditChat,
-  submitIncidentAuditDictum,
-} from "./disputes";
+import { openIncidentAudit, getIncidentAuditChat, submitIncidentAuditDictum } from "./disputes";
 
 describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
   beforeEach(() => {
@@ -116,7 +112,8 @@ describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
           candidateId: "cand-maria-77",
           candidateName: "María Fernández",
           infraccion: "DISCREPANCIA_SALARIAL",
-          reason: "El reclutador ofreció $18,000 en chat privado pese a que la vacante anunciaba $45,000.",
+          reason:
+            "El reclutador ofreció $18,000 en chat privado pese a que la vacante anunciaba $45,000.",
           severity: "ALTA",
         },
       });
@@ -143,7 +140,9 @@ describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
         {
           headers: { "x-user-role": "MODERATOR" },
           pathParameters: { incidentId: "inc-salary-dispute" },
-          body: JSON.stringify({ notes: "Admisión formal por discrepancia salarial flagrante." }),
+          body: JSON.stringify({
+            notes: "Admisión formal por discrepancia salarial flagrante.",
+          }),
         } as any,
         {} as any,
         () => {},

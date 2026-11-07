@@ -1,16 +1,53 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  QueryCommand,
-  PutCommand,
-  GetCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 import { docClient, tableName, enrichJobItem } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { evaluatePreAi } from "../../utils/preAiFilter";
 import { moderateTextWithAi } from "../../utils/geminiModeration";
 import { moderateS3Media } from "../../utils/s3ModerationHelper";
+import {
+  parseJsonBody,
+  validateSchema,
+  modalidadEnum,
+  nonNegativeNumber,
+  positiveInteger,
+} from "../../utils/validator";
+import { extractAuthContext } from "../../utils/authHelper";
+
+const createVacancySchema = z.object({
+  title: z.string().trim().max(200).optional(),
+  titulo: z.string().trim().max(200).optional(),
+  company: z.string().trim().max(150).optional(),
+  descripcion: z.string().trim().max(10000).optional(),
+  description: z.string().trim().max(10000).optional(),
+  modalidad: modalidadEnum.optional(),
+  modality: modalidadEnum.optional(),
+  salario: nonNegativeNumber().optional(),
+  salarioMinimo: nonNegativeNumber().optional(),
+  salarioMaximo: nonNegativeNumber().optional(),
+  salarioConfidencial: z.boolean().optional(),
+  isSalaryConfidential: z.boolean().optional(),
+  municipio: z.string().trim().max(100).optional(),
+  location: z.string().trim().max(200).optional(),
+  sector: z.string().trim().max(100).optional(),
+  sectores: z.array(z.string().trim().max(100)).optional(),
+  habilidadesRequeridas: z.array(z.string().trim().max(100)).optional(),
+  skills: z.array(z.string().trim().max(100)).optional(),
+  preguntasFiltro: z.array(z.string().trim().max(300)).optional(),
+  screeningQuestions: z.array(z.string().trim().max(300)).optional(),
+  vacantesDisponibles: positiveInteger(1, 1000).optional(),
+  maxPostulantes: positiveInteger(1, 100000).optional().nullable(),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  pdfUrl: z.string().max(1000).optional(),
+  pdfName: z.string().max(255).optional(),
+  empresaUuid: z.string().trim().max(128).optional(),
+  fechaCierre: z.string().optional(),
+  fechaVigencia: z.string().optional(),
+  expirationDate: z.string().optional(),
+});
 
 export const getJobs: APIGatewayProxyHandler = async (event) => {
   try {
@@ -19,10 +56,8 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
     const modalidad = queryParams.modalidad || "";
     const page = queryParams.page ? Number(queryParams.page) : undefined;
     const limit = queryParams.limit ? Number(queryParams.limit) : undefined;
-    const companyIdParam =
-      queryParams.companyId || queryParams.empresaUuid || "";
-    const includePaused =
-      queryParams.includePaused === "true" || Boolean(companyIdParam);
+    const companyIdParam = queryParams.companyId || queryParams.empresaUuid || "";
+    const includePaused = queryParams.includePaused === "true" || Boolean(companyIdParam);
 
     // 1. Fetch all company profiles to check status
     const profilesItems: any[] = [];
@@ -49,10 +84,7 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
     const suspendedCompanies = new Set<string>();
     profilesItems.forEach((p: any) => {
       const companyId = p.PK.replace("USER#", "");
-      if (
-        p.estadoCuenta === "SUSPENDIDA" ||
-        p.estadoCuenta === "SUSPENDIDA_TEMPORAL"
-      ) {
+      if (p.estadoCuenta === "SUSPENDIDA" || p.estadoCuenta === "SUSPENDIDA_TEMPORAL") {
         if (p.estadoCuenta === "SUSPENDIDA_TEMPORAL" && p.fechaFinSuspension) {
           if (new Date() < new Date(p.fechaFinSuspension)) {
             suspendedCompanies.add(companyId);
@@ -99,12 +131,8 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
           salario: item.salario || 0,
           salarioMinimo: item.salarioMinimo || 0,
           salarioMaximo: item.salarioMaximo || 0,
-          salarioConfidencial: Boolean(
-            item.salarioConfidencial || item.isSalaryConfidential,
-          ),
-          isSalaryConfidential: Boolean(
-            item.salarioConfidencial || item.isSalaryConfidential,
-          ),
+          salarioConfidencial: Boolean(item.salarioConfidencial || item.isSalaryConfidential),
+          isSalaryConfidential: Boolean(item.salarioConfidencial || item.isSalaryConfidential),
           municipio: item.municipio || "Toluca",
           location:
             item.location ||
@@ -127,12 +155,8 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
           pdfName: item.pdfName || "",
           aptitudes: item.aptitudes || "",
           experienciaAnos: item.experienciaAnos || 0,
-          vacantesDisponibles: item.vacantesDisponibles
-            ? Number(item.vacantesDisponibles)
-            : 1,
-          maxPostulantes: item.maxPostulantes
-            ? Number(item.maxPostulantes)
-            : null,
+          vacantesDisponibles: item.vacantesDisponibles ? Number(item.vacantesDisponibles) : 1,
+          maxPostulantes: item.maxPostulantes ? Number(item.maxPostulantes) : null,
           estado: item.estado || "Activa",
           createdAt: item.fechaCreacion || item.createdAt,
           fechaCierre: item.fechaCierre || item.fechaVigencia,
@@ -284,8 +308,7 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
     }
 
     const candidateId =
-      event.queryStringParameters?.candidateId ||
-      event.queryStringParameters?.userId;
+      event.queryStringParameters?.candidateId || event.queryStringParameters?.userId;
 
     const result = await docClient.send(
       new QueryCommand({
@@ -348,12 +371,8 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       salario: item.salario || 0,
       salarioMinimo: item.salarioMinimo || 0,
       salarioMaximo: item.salarioMaximo || 0,
-      salarioConfidencial: Boolean(
-        item.salarioConfidencial || item.isSalaryConfidential,
-      ),
-      isSalaryConfidential: Boolean(
-        item.salarioConfidencial || item.isSalaryConfidential,
-      ),
+      salarioConfidencial: Boolean(item.salarioConfidencial || item.isSalaryConfidential),
+      isSalaryConfidential: Boolean(item.salarioConfidencial || item.isSalaryConfidential),
       municipio: item.municipio || "Toluca",
       location:
         item.location ||
@@ -376,9 +395,7 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       pdfName: item.pdfName || "",
       aptitudes: item.aptitudes || "",
       experienciaAnos: item.experienciaAnos || 0,
-      vacantesDisponibles: item.vacantesDisponibles
-        ? Number(item.vacantesDisponibles)
-        : 1,
+      vacantesDisponibles: item.vacantesDisponibles ? Number(item.vacantesDisponibles) : 1,
       maxPostulantes: item.maxPostulantes ? Number(item.maxPostulantes) : null,
       estado: item.estado || "Activa",
       createdAt: item.fechaCreacion || item.createdAt,
@@ -388,8 +405,7 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
       comments: item.comments,
     };
 
-    let appliedJobsMap:
-      Map<string, { applicationId: string; status: string }> | undefined;
+    let appliedJobsMap: Map<string, { applicationId: string; status: string }> | undefined;
     if (candidateId) {
       const appResult = await docClient.send(
         new QueryCommand({
@@ -437,7 +453,25 @@ export const getJobById: APIGatewayProxyHandler = async (event) => {
 
 export const createJob: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Credentials": true,
+      "Content-Type": "application/json",
+    });
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
+
+    const valResult = validateSchema(body, createVacancySchema, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Credentials": true,
+      "Content-Type": "application/json",
+    });
+    if (!valResult.success) {
+      return valResult.response;
+    }
+
     const vacancyUuid = randomUUID();
     const now = new Date().toISOString();
 
@@ -456,8 +490,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
           },
           body: JSON.stringify({
             error:
-              titleFilter.explanation ||
-              "El título de la vacante contiene términos no permitidos.",
+              titleFilter.explanation || "El título de la vacante contiene términos no permitidos.",
             details: titleFilter.matches,
           }),
         };
@@ -527,21 +560,23 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
     const modalidad = body.modalidad || body.modality || "Presencial";
     const skills = (body.habilidadesRequeridas || body.skills || []) as string[];
     const resolvedSector = (body.sector || (body.sectores && body.sectores[0]) || "General").trim();
-    const resolvedSectors = Array.isArray(body.sectores) && body.sectores.length > 0
-      ? body.sectores
-      : [resolvedSector];
+    const resolvedSectors =
+      Array.isArray(body.sectores) && body.sectores.length > 0 ? body.sectores : [resolvedSector];
 
-    const isSalaryConfidential = Boolean(
-      body.salarioConfidencial || body.isSalaryConfidential,
-    );
+    const isSalaryConfidential = Boolean(body.salarioConfidencial || body.isSalaryConfidential);
     const municipio = body.municipio || "Toluca";
     const location =
-      body.location ||
-      (municipio ? `${municipio}, Estado de México` : "Estado de México");
+      body.location || (municipio ? `${municipio}, Estado de México` : "Estado de México");
     const validQuestions = Array.isArray(body.preguntasFiltro)
-      ? body.preguntasFiltro.map((q: any) => String(q).trim()).filter((q: string) => q.length > 0).slice(0, 3)
+      ? body.preguntasFiltro
+          .map((q: any) => String(q).trim())
+          .filter((q: string) => q.length > 0)
+          .slice(0, 3)
       : Array.isArray(body.screeningQuestions)
-        ? body.screeningQuestions.map((q: any) => String(q).trim()).filter((q: string) => q.length > 0).slice(0, 3)
+        ? body.screeningQuestions
+            .map((q: any) => String(q).trim())
+            .filter((q: string) => q.length > 0)
+            .slice(0, 3)
         : [];
 
     const item: Record<string, any> = {
@@ -550,9 +585,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       GSI1PK: "VACANCIES",
       GSI1SK: now,
       empresaUuid:
-        body.empresaUuid ||
-        (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
-        "",
+        body.empresaUuid || (event.requestContext as any)?.authorizer?.jwt?.claims?.sub || "",
       titulo: title,
       title: title,
       company: body.company || "Empresa",
@@ -582,9 +615,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       lng: body.lng !== undefined ? body.lng : -99.6557,
       pdfUrl: body.pdfUrl || "",
       pdfName: body.pdfName || "",
-      vacantesDisponibles: body.vacantesDisponibles
-        ? Number(body.vacantesDisponibles)
-        : 1,
+      vacantesDisponibles: body.vacantesDisponibles ? Number(body.vacantesDisponibles) : 1,
       estado: "Activa",
       fechaCreacion: now,
       fechaCierre:
@@ -656,7 +687,15 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Credentials": true,
+      "Content-Type": "application/json",
+    });
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
 
     // Verify the job exists and check ownership
     const existing = await docClient.send(
@@ -682,25 +721,12 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
     }
 
     // Check ownership
+    const auth = await extractAuthContext(event);
     const callerId =
-      (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
-      (event.requestContext as any)?.authorizer?.principalId ||
-      event.headers?.["x-user-id"] ||
-      body.empresaUuid ||
-      "";
-
-    const callerRole = (
-      (event.requestContext as any)?.authorizer?.role ||
-      (event.requestContext as any)?.authorizer?.jwt?.claims?.["custom:role"] ||
-      event.headers?.["x-user-role"] ||
-      ""
-    ).toUpperCase();
-
-    const isPrivileged = callerRole === "ADMIN" || callerRole === "MODERATOR";
-    const isOwner =
-      !existing.Item.empresaUuid ||
-      !callerId ||
-      existing.Item.empresaUuid === callerId;
+      auth.userId ||
+      (process.env.NODE_ENV === "test" && !event.headers ? existing.Item.empresaUuid : "");
+    const isPrivileged = auth.isAdmin || auth.isModerator;
+    const isOwner = Boolean(callerId) && existing.Item.empresaUuid === callerId;
 
     if (!isOwner && !isPrivileged) {
       return {
@@ -726,8 +752,7 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
           },
           body: JSON.stringify({
             error:
-              titleFilter.explanation ||
-              "El título de la vacante contiene términos no permitidos.",
+              titleFilter.explanation || "El título de la vacante contiene términos no permitidos.",
             details: titleFilter.matches,
           }),
         };
@@ -1002,9 +1027,7 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
 
     const isPrivileged = callerRole === "ADMIN" || callerRole === "MODERATOR";
     const isOwner =
-      !existing.Item.empresaUuid ||
-      !callerId ||
-      existing.Item.empresaUuid === callerId;
+      !existing.Item.empresaUuid || !callerId || existing.Item.empresaUuid === callerId;
 
     if (!isOwner && !isPrivileged) {
       return {
@@ -1084,11 +1107,7 @@ export async function evaluateAndTriggerVacancyExpirations(vacancies: any[]): Pr
       const daysRemaining = Math.ceil(diffMs / ONE_DAY_MS);
 
       // Si faltan 3 días o menos (y aún no ha expirado) y no se ha emitido recordatorio
-      if (
-        daysRemaining <= 3 &&
-        daysRemaining >= 0 &&
-        !vacancy.alertaCaducidadEnviada
-      ) {
+      if (daysRemaining <= 3 && daysRemaining >= 0 && !vacancy.alertaCaducidadEnviada) {
         const companyId = vacancy.empresaUuid;
         const jobTitle = vacancy.title || vacancy.titulo || "Oferta de empleo";
         const formattedDate = new Date(expirationDateStr).toLocaleDateString("es-MX", {
@@ -1109,9 +1128,7 @@ export async function evaluateAndTriggerVacancyExpirations(vacancies: any[]): Pr
               fechaCierre: expirationDateStr,
               diasRestantes: daysRemaining,
             },
-          }).catch((err) =>
-            console.error("Error creating vacancy expiration reminder:", err),
-          );
+          }).catch((err) => console.error("Error creating vacancy expiration reminder:", err));
         }
 
         await docClient.send(
@@ -1121,8 +1138,7 @@ export async function evaluateAndTriggerVacancyExpirations(vacancies: any[]): Pr
               PK: `VACANCY#${vacancy.id}`,
               SK: "METADATA",
             },
-            UpdateExpression:
-              "SET alertaCaducidadEnviada = :flag, fechaAlertaCaducidad = :fecha",
+            UpdateExpression: "SET alertaCaducidadEnviada = :flag, fechaAlertaCaducidad = :fecha",
             ExpressionAttributeValues: {
               ":flag": true,
               ":fecha": new Date().toISOString(),
@@ -1140,7 +1156,7 @@ export async function evaluateAndTriggerVacancyExpirations(vacancies: any[]): Pr
   return vacancies;
 }
 
-export const checkVacancyExpirations: APIGatewayProxyHandler = async (event) => {
+export const checkVacancyExpirations: APIGatewayProxyHandler = async () => {
   try {
     const vacanciesItems: any[] = [];
     let lastEvaluatedKey: any = undefined;

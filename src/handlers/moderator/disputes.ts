@@ -1,10 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  GetCommand,
-  PutCommand,
-  UpdateCommand,
-  QueryCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { GetCommand, PutCommand, UpdateCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import {
   docClient,
   tableName,
@@ -15,6 +10,7 @@ import {
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
 import { extractAuthContext } from "../../utils/authHelper";
+import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 
 export interface AuditChatMessage {
   id: string;
@@ -134,17 +130,8 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
  */
 export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
   try {
-    const userRole = (
-      event.headers["x-user-role"] ||
-      event.headers["X-User-Role"] ||
-      ""
-    ).toUpperCase();
-
-    if (
-      userRole !== "MODERATOR" &&
-      userRole !== "MODERADOR" &&
-      userRole !== "ADMIN"
-    ) {
+    const auth = await extractAuthContext(event);
+    if (!auth.isAdmin && !auth.isModerator) {
       return {
         statusCode: 403,
         headers,
@@ -156,7 +143,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
     }
 
     const incidentId = event.pathParameters?.incidentId;
-    if (!incidentId) {
+    if (!incidentId || !safeIdSchema.safeParse(incidentId).success) {
       return {
         statusCode: 400,
         headers,
@@ -164,7 +151,11 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const notes = body.notes || "";
     const timestamp = new Date().toISOString();
 
@@ -191,17 +182,13 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
       candidateId: "cand-maria-77",
       candidateName: "María Fernández",
       infraccion: "DISCREPANCIA_SALARIAL",
-      reason:
-        "Controversia grave reportada en el proceso de reclutamiento o postulación.",
+      reason: "Controversia grave reportada en el proceso de reclutamiento o postulación.",
       severity: "ALTA",
     };
 
     const targetCompanyId = incident.companyId || "org-recruiter-99";
-    const targetCandidateId =
-      incident.candidateId || incident.reporterId || "cand-maria-77";
-    const infractionName = (
-      incident.infraccion || "CONTROVERSIA_GRAVE"
-    ).toUpperCase();
+    const targetCandidateId = incident.candidateId || incident.reporterId || "cand-maria-77";
+    const infractionName = (incident.infraccion || "CONTROVERSIA_GRAVE").toUpperCase();
 
     // 2. Mark incident as under audit in DynamoDB
     await docClient.send(
@@ -249,9 +236,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
       body: `El canal de mensajería para la vacante "${incident.jobTitle || "empleo"}" entra en revisión supervisada por Moderación.`,
       url: "/notifications",
       data: { type: "AUDIT_CHANNEL_SUPERVISED", incidentId },
-    }).catch((err) =>
-      console.warn("Could not send push notification to candidate:", err),
-    );
+    }).catch((err) => console.warn("Could not send push notification to candidate:", err));
 
     // 4. Notificación formal a la Organización / Reclutador (In-app + Web Push + Email SES)
     const notifOrgId = Math.random().toString(36).substring(2, 15);
@@ -278,9 +263,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
       body: `Su canal de mensajería entra en revisión supervisada por presunta infracción (${infractionName}).`,
       url: "/notifications",
       data: { type: "AUDIT_CHANNEL_SUPERVISED", incidentId },
-    }).catch((err) =>
-      console.warn("Could not send push notification to company:", err),
-    );
+    }).catch((err) => console.warn("Could not send push notification to company:", err));
 
     await sendEmailToCompany(
       targetCompanyId,
@@ -389,8 +372,7 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
     };
 
     const jobId = incident.jobId || "vac-frontend-sr-01";
-    const candidateId =
-      incident.candidateId || incident.reporterId || "cand-maria-77";
+    const candidateId = incident.candidateId || incident.reporterId || "cand-maria-77";
 
     // 2. Query DynamoDB chat messages
     let messages: AuditChatMessage[] = [];
@@ -429,10 +411,7 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
     // 3. If no messages found in DB, provide realistic evidence corresponding to infraction type
     if (messages.length === 0) {
       const infractionKey = (incident.infraccion || "").toUpperCase();
-      if (
-        infractionKey.includes("SALARIO") ||
-        infractionKey.includes("DISCREPANCIA")
-      ) {
+      if (infractionKey.includes("SALARIO") || infractionKey.includes("DISCREPANCIA")) {
         messages = BASELINE_DISPUTE_CHATS.SALARIO;
       } else if (infractionKey.includes("ACOSO")) {
         messages = BASELINE_DISPUTE_CHATS.ACOSO;
@@ -457,8 +436,7 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
           companyId: incident.companyId || "org-recruiter-99",
           companyName: incident.companyName || "Organización",
           candidateId,
-          candidateName:
-            incident.candidateName || incident.reporter || "Candidato",
+          candidateName: incident.candidateName || incident.reporter || "Candidato",
           infraccion: incident.infraccion || "FRAUDE",
           severity: incident.severity || "ALTA",
           reason: incident.reason || "",
@@ -485,9 +463,7 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
  * Permite al moderador evaluar la evidencia probatoria e ingresar el dictamen oficial:
  * Sancionar Organización, Emitir Advertencia, o Desestimar Incidencia.
  */
-export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (
-  event,
-) => {
+export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (event) => {
   try {
     const auth = await extractAuthContext(event);
     const userRole = (
@@ -526,10 +502,7 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (
     const body = JSON.parse(event.body || "{}");
     const { dictum, notes, graceDays } = body;
 
-    if (
-      !dictum ||
-      !["SANCION_EMPRESA", "ADVERTENCIA", "DESESTIMADA"].includes(dictum)
-    ) {
+    if (!dictum || !["SANCION_EMPRESA", "ADVERTENCIA", "DESESTIMADA"].includes(dictum)) {
       return {
         statusCode: 400,
         headers,
@@ -562,8 +535,7 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (
     };
 
     const companyId = incident.companyId || "org-recruiter-99";
-    const candidateId =
-      incident.candidateId || incident.reporterId || "cand-maria-77";
+    const candidateId = incident.candidateId || incident.reporterId || "cand-maria-77";
 
     // 2. Execute resolution according to dictum
     if (dictum === "SANCION_EMPRESA") {

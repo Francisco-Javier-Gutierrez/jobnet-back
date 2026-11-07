@@ -60,40 +60,30 @@ describe("dtoEnricher utility", () => {
 
   describe("formatUbicacion", () => {
     it("should return sector if present", () => {
-      expect(formatUbicacion({ sector: "Polanco, CDMX" })).toBe(
-        "Polanco, CDMX",
-      );
+      expect(formatUbicacion({ sector: "Polanco, CDMX" })).toBe("Polanco, CDMX");
     });
 
     it("should format coordinates if lat/lng are provided in ubicacion object", () => {
-      expect(
-        formatUbicacion({ ubicacion: { lat: 19.4326, lng: -99.1332 } }),
-      ).toBe("Coordenadas (19.4326, -99.1332)");
-      expect(
-        formatUbicacion({ ubicacion: { lat: 19.4326 }, lng: -99.1332 }),
-      ).toBe("Coordenadas (19.4326, -99.1332)");
+      expect(formatUbicacion({ ubicacion: { lat: 19.4326, lng: -99.1332 } })).toBe(
+        "Coordenadas (19.4326, -99.1332)",
+      );
+      expect(formatUbicacion({ ubicacion: { lat: 19.4326 }, lng: -99.1332 })).toBe(
+        "Coordenadas (19.4326, -99.1332)",
+      );
     });
 
     it("should format coordinates if top-level lat/lng are provided", () => {
       expect(formatUbicacion({ lat: 20.1234, lng: -100.5678 })).toBe(
         "Coordenadas (20.1234, -100.5678)",
       );
-      expect(formatUbicacion({ lat: 0, lng: -100.5678 })).toBe(
-        "Coordenadas (0.0000, -100.5678)",
-      );
-      expect(formatUbicacion({ lat: 20.1234, lng: 0 })).toBe(
-        "Coordenadas (20.1234, 0.0000)",
-      );
+      expect(formatUbicacion({ lat: 0, lng: -100.5678 })).toBe("Coordenadas (0.0000, -100.5678)");
+      expect(formatUbicacion({ lat: 20.1234, lng: 0 })).toBe("Coordenadas (20.1234, 0.0000)");
     });
 
     it("should fallback to 'Ubicación no especificada' when lat/lng are 0 or missing", () => {
       expect(formatUbicacion({})).toBe("Ubicación no especificada");
-      expect(formatUbicacion({ lat: 0, lng: 0 })).toBe(
-        "Ubicación no especificada",
-      );
-      expect(formatUbicacion({ ubicacion: { lat: 0, lng: 0 } })).toBe(
-        "Ubicación no especificada",
-      );
+      expect(formatUbicacion({ lat: 0, lng: 0 })).toBe("Ubicación no especificada");
+      expect(formatUbicacion({ ubicacion: { lat: 0, lng: 0 } })).toBe("Ubicación no especificada");
     });
   });
 
@@ -148,9 +138,7 @@ describe("dtoEnricher utility", () => {
         estado: "Activa",
       };
 
-      const appliedMap = new Map([
-        ["job-123", { applicationId: "user-1", status: "PENDIENTE" }],
-      ]);
+      const appliedMap = new Map([["job-123", { applicationId: "user-1", status: "PENDIENTE" }]]);
 
       const enriched = enrichJobItem(rawJob, appliedMap);
       expect(enriched.userContext).toBeDefined();
@@ -236,12 +224,8 @@ describe("dtoEnricher utility", () => {
       expect(enriched.hasCv).toBe(true);
       expect(enriched.cvName).toBe("");
       expect(enriched.documentosAdicionales).toEqual(["cert.pdf"]);
-      expect(enriched.links).toEqual([
-        { label: "Portfolio", url: "https://maria.design" },
-      ]);
-      expect(enriched.enlacesWeb).toEqual([
-        { label: "Portfolio", url: "https://maria.design" },
-      ]);
+      expect(enriched.links).toEqual([{ label: "Portfolio", url: "https://maria.design" }]);
+      expect(enriched.enlacesWeb).toEqual([{ label: "Portfolio", url: "https://maria.design" }]);
     });
 
     it("should default cvName to Currículum.pdf when cvUrl is present but cvName is missing", () => {

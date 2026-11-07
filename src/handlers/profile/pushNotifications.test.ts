@@ -53,8 +53,6 @@ import {
   sendCustomPushNotification,
 } from "./notifications";
 import {
-  savePushSubscription as saveSubService,
-  removePushSubscription as removeSubService,
   sendPushToUser,
   hashEndpoint,
   getAllPushSubscribers,
@@ -237,8 +235,7 @@ describe("push notifications", () => {
     });
 
     it("parses Android and Firefox correctly", () => {
-      const ua =
-        "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0";
+      const ua = "Mozilla/5.0 (Android 14; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0";
       const parsed = parseUserAgent(ua);
       expect(parsed.browser).toBe("Firefox");
       expect(parsed.os).toBe("Android");
@@ -260,8 +257,7 @@ describe("push notifications", () => {
               PK: "USER#user-1",
               SK: "PUSH_SUB#hash1",
               endpoint: "https://push.example.com/1",
-              userAgent:
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
+              userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
               createdAt: "2026-10-14T10:00:00.000Z",
               updatedAt: "2026-10-14T10:00:00.000Z",
             },

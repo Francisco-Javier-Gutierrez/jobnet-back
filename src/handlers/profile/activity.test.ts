@@ -24,11 +24,7 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import {
-  getProfileVacancies,
-  getProfilePosts,
-  getProfileBookmarks,
-} from "./activity";
+import { getProfileVacancies, getProfilePosts, getProfileBookmarks } from "./activity";
 
 describe("profile activity handlers", () => {
   beforeEach(() => {
@@ -39,11 +35,7 @@ describe("profile activity handlers", () => {
 
   describe("getProfileVacancies", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getProfileVacancies(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfileVacancies({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -89,11 +81,7 @@ describe("profile activity handlers", () => {
 
   describe("getProfilePosts", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getProfilePosts(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfilePosts({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -159,11 +147,7 @@ describe("profile activity handlers", () => {
 
   describe("getProfileBookmarks", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getProfileBookmarks(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getProfileBookmarks({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 

@@ -7,6 +7,7 @@ import {
   DeleteCommand,
   GetCommand,
 } from "@aws-sdk/lib-dynamodb";
+import { parseJsonBody, safeIdSchema } from "../utils/validator";
 
 const isOffline = process.env.IS_OFFLINE === "true";
 
@@ -66,9 +67,17 @@ export const getCatalog: APIGatewayProxyHandler = async () => {
 
 export const createCatalogItem: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
+    const parseResult = parseJsonBody(event.body, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Credentials": true,
+      "Content-Type": "application/json",
+    });
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const { name, category, id } = body;
-    if (!name || !category) {
+    if (!name || !category || typeof name !== "string" || typeof category !== "string") {
       return {
         statusCode: 400,
         headers: {
@@ -78,6 +87,20 @@ export const createCatalogItem: APIGatewayProxyHandler = async (event) => {
         },
         body: JSON.stringify({
           error: "Missing required fields 'name' and 'category'",
+        }),
+      };
+    }
+
+    if (id && !safeIdSchema.safeParse(id).success) {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Credentials": true,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          error: "Invalid catalog item id",
         }),
       };
     }

@@ -62,11 +62,7 @@ export const getEndpoint = (event: any) => {
   return `https://${wsApiId}.execute-api.us-east-1.amazonaws.com/${stage}`;
 };
 
-export const broadcastAppealResolved = async (
-  companyId: string,
-  status: string,
-  event: any,
-) => {
+export const broadcastAppealResolved = async (companyId: string, status: string, event: any) => {
   const targetKeys: string[] = [`USER#${companyId}`, "ROLE#MODERATOR"];
 
   try {
@@ -76,13 +72,8 @@ export const broadcastAppealResolved = async (
         Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
       }),
     );
-    const ownerSub =
-      companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
-    if (
-      ownerSub &&
-      ownerSub !== companyId &&
-      !targetKeys.includes(`USER#${ownerSub}`)
-    ) {
+    const ownerSub = companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
+    if (ownerSub && ownerSub !== companyId && !targetKeys.includes(`USER#${ownerSub}`)) {
       targetKeys.push(`USER#${ownerSub}`);
     }
   } catch {
@@ -133,9 +124,7 @@ export const broadcastAppealResolved = async (
   }
 };
 
-export const getOrgAppealMessageCount = async (
-  companyId: string,
-): Promise<number> => {
+export const getOrgAppealMessageCount = async (companyId: string): Promise<number> => {
   if (!companyId) return 0;
   try {
     const result = await docClient.send(
@@ -197,11 +186,7 @@ export async function saveAuditLog(params: AuditLogParams) {
   return auditItem;
 }
 
-export async function blockCorporateDomain(
-  domain: string,
-  reason: string,
-  companyId?: string,
-) {
+export async function blockCorporateDomain(domain: string, reason: string, companyId?: string) {
   if (!domain || isPublicEmailDomain(domain)) {
     return; // Do not block public provider email domains
   }
@@ -217,9 +202,7 @@ export async function blockCorporateDomain(
         SK: "METADATA",
         domain: cleanDomain,
         blockedAt: timestamp,
-        reason:
-          reason ||
-          "Suspensión por prácticas fraudulentas o suplantación (RF-74)",
+        reason: reason || "Suspensión por prácticas fraudulentas o suplantación (RF-74)",
         companyId: companyId || "",
       },
     }),
@@ -241,11 +224,8 @@ export async function executeOrgSuspensionInitiation(
   graceDays: number = 4,
 ) {
   const now = new Date();
-  const gracePeriodEnd = new Date(
-    now.getTime() + graceDays * 24 * 60 * 60 * 1000,
-  ).toISOString();
-  const ttlSeconds =
-    Math.floor(now.getTime() / 1000) + graceDays * 24 * 60 * 60;
+  const gracePeriodEnd = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
+  const ttlSeconds = Math.floor(now.getTime() / 1000) + graceDays * 24 * 60 * 60;
   const timestamp = now.toISOString();
 
   // 1. Marcar empresa en estado "En revisión"
@@ -333,9 +313,7 @@ export async function executeOrgSuspensionInitiation(
     body: `Su cuenta ha entrado en estado de Revisión debido a: ${reason}. Dispone de un periodo de gracia para apelar.`,
     url: "/notifications",
     data: { type: "SUSPENSION_NOTICE", companyId },
-  }).catch((err) =>
-    console.error("Error sending push for suspension process:", err),
-  );
+  }).catch((err) => console.error("Error sending push for suspension process:", err));
 
   // 5. Enviar correo electrónico oficial por SES (Fase 1)
   await sendEmailToCompany(
@@ -358,11 +336,7 @@ export async function executeOrgSuspensionInitiation(
   return { gracePeriodEnd, timestamp };
 }
 
-export async function sendEmailToCompany(
-  companyId: string,
-  subject: string,
-  bodyText: string,
-) {
+export async function sendEmailToCompany(companyId: string, subject: string, bodyText: string) {
   try {
     const companyProfile = await docClient.send(
       new GetCommand({
@@ -401,14 +375,9 @@ export async function sendEmailToCompany(
             },
           }),
         )
-        .catch((err) =>
-          console.error(`Error sending SES email to ${companyEmail}:`, err),
-        );
+        .catch((err) => console.error(`Error sending SES email to ${companyEmail}:`, err));
     }
   } catch (err) {
-    console.error(
-      `Error fetching company profile for SES email (${companyId}):`,
-      err,
-    );
+    console.error(`Error fetching company profile for SES email (${companyId}):`, err);
   }
 }

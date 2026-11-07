@@ -1,16 +1,9 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  ScanCommand,
-  GetCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
-import {
-  docClient,
-  tableName,
-  headers,
-  saveAuditLog,
-} from "./common";
+import { ScanCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { docClient, tableName, headers, saveAuditLog } from "./common";
 import { detectAnomalousConcurrency } from "../../utils/anomalyDetector";
+import { extractAuthContext } from "../../utils/authHelper";
+import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 
 export const getAuditLogs: APIGatewayProxyHandler = async () => {
   try {
@@ -90,15 +83,32 @@ export const getBlockedDomains: APIGatewayProxyHandler = async () => {
 export const toggleUserBlock: APIGatewayProxyHandler = async (event) => {
   try {
     const userId = event.pathParameters?.id;
-    if (!userId) {
+    if (!userId || !safeIdSchema.safeParse(userId).success) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing userId" }),
+        body: JSON.stringify({ error: "Missing or invalid userId" }),
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Bloqueo de usuarios exclusivo para Moderadores y Administradores.",
+        }),
+      };
+    }
+
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const { blocked, reason } = body;
     const timestamp = new Date().toISOString();
 
@@ -149,9 +159,7 @@ export const toggleUserBlock: APIGatewayProxyHandler = async (event) => {
       targetId: userId,
       targetType: tipoUsuario,
       action: blocked ? "BLOQUEO_MANUAL" : "DESBLOQUEO_MANUAL",
-      reason:
-        reason ||
-        (blocked ? "Bloqueo por moderador" : "Desbloqueo por moderador"),
+      reason: reason || (blocked ? "Bloqueo por moderador" : "Desbloqueo por moderador"),
       executorId: "MODERADOR",
     });
 
@@ -169,9 +177,7 @@ export const toggleUserBlock: APIGatewayProxyHandler = async (event) => {
   }
 };
 
-export const getModeratorConcurrencyAlerts: APIGatewayProxyHandler = async (
-  event,
-) => {
+export const getModeratorConcurrencyAlerts: APIGatewayProxyHandler = async (event) => {
   try {
     const userRole = (
       event.headers["x-user-role"] ||
@@ -179,11 +185,7 @@ export const getModeratorConcurrencyAlerts: APIGatewayProxyHandler = async (
       ""
     ).toUpperCase();
 
-    if (
-      userRole !== "MODERATOR" &&
-      userRole !== "MODERADOR" &&
-      userRole !== "ADMIN"
-    ) {
+    if (userRole !== "MODERATOR" && userRole !== "MODERADOR" && userRole !== "ADMIN") {
       return {
         statusCode: 403,
         headers,
@@ -247,4 +249,3 @@ export const getModeratorConcurrencyAlerts: APIGatewayProxyHandler = async (
     };
   }
 };
-

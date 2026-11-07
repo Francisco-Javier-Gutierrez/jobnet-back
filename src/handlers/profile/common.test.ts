@@ -71,11 +71,7 @@ describe("profile common", () => {
       // default fallbacks for post with no fotoPerfil or authorAvatar
     };
 
-    const results = await enrichPostsWithRelations(
-      [post1, post2],
-      mockClient,
-      "table",
-    );
+    const results = await enrichPostsWithRelations([post1, post2], mockClient, "table");
     expect(results).toHaveLength(2);
     expect(results[0].uniqueId).toBe("uuid-1");
     expect(results[0].likesList).toContain("user-1");

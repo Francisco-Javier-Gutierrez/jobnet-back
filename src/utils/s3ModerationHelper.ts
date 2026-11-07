@@ -27,14 +27,15 @@ export async function moderateS3Media(
 
   try {
     const match = urlOrKey.match(/(uploads\/[^?]+)/);
-    const key = match
-      ? match[1]
-      : urlOrKey.startsWith("uploads/")
-        ? urlOrKey
-        : null;
+    const key = match ? match[1] : urlOrKey.startsWith("uploads/") ? urlOrKey : null;
 
     if (!key) {
-      return { safe: true, confidence: 1.0, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 1.0,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const res = await s3Client.send(
@@ -45,7 +46,12 @@ export async function moderateS3Media(
     );
 
     if (!res.Body) {
-      return { safe: true, confidence: 1.0, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 1.0,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const byteArray = await res.Body.transformToByteArray();

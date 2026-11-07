@@ -153,9 +153,7 @@ describe("moderator governance handlers", () => {
           stage: "dev",
         },
       });
-      expect(endpoint).toBe(
-        "https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev",
-      );
+      expect(endpoint).toBe("https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev");
     });
 
     it("should return localhost endpoint when IS_OFFLINE is true in moderator common", async () => {
@@ -242,11 +240,7 @@ describe("moderator governance handlers", () => {
 
   describe("toggleUserBlock", () => {
     it("should return 400 if userId is missing", async () => {
-      const res = await toggleUserBlock(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await toggleUserBlock({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -383,9 +377,7 @@ describe("moderator governance handlers", () => {
 
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
-      const detected = body.anomalies.find(
-        (a: any) => a.organizationId === "org-bot-recruiter-55",
-      );
+      const detected = body.anomalies.find((a: any) => a.organizationId === "org-bot-recruiter-55");
       expect(detected).toBeDefined();
       expect(detected.type).toBe("RAPID_VACANCIES");
       expect(detected.count).toBe(13);
@@ -415,9 +407,7 @@ describe("moderator governance handlers", () => {
 
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
-      const detected = body.anomalies.find(
-        (a: any) => a.organizationId === "org-scam-99",
-      );
+      const detected = body.anomalies.find((a: any) => a.organizationId === "org-scam-99");
       expect(detected).toBeDefined();
       expect(detected.type).toBe("REPORT_SURGE");
       expect(detected.count).toBe(8);

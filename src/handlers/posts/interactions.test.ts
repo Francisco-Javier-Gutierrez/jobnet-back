@@ -54,11 +54,7 @@ describe("posts interactions handlers", () => {
 
   describe("toggleLikePost", () => {
     it("should return 400 if id or userUuid is missing", async () => {
-      const res1 = await toggleLikePost(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res1 = await toggleLikePost({ pathParameters: {} } as any, {} as any, () => {});
       expect(res1.statusCode).toBe(400);
 
       const res2 = await toggleLikePost(
@@ -115,11 +111,7 @@ describe("posts interactions handlers", () => {
 
   describe("addCommentPost", () => {
     it("should return 400 if id or content is missing", async () => {
-      const res1 = await addCommentPost(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res1 = await addCommentPost({ pathParameters: {} } as any, {} as any, () => {});
       expect(res1.statusCode).toBe(400);
 
       const res2 = await addCommentPost(
@@ -183,11 +175,7 @@ describe("posts interactions handlers", () => {
 
   describe("deleteCommentPost", () => {
     it("should return 400 if id or commentId is missing", async () => {
-      const res = await deleteCommentPost(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await deleteCommentPost({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -262,11 +250,7 @@ describe("posts interactions handlers", () => {
 
   describe("toggleBookmarkPost", () => {
     it("should return 400 if id or userUuid is missing", async () => {
-      const res = await toggleBookmarkPost(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await toggleBookmarkPost({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
 
       const res2 = await toggleBookmarkPost(

@@ -76,11 +76,7 @@ describe("posts CRUD handlers", () => {
         },
       }); // GetCommand profile
 
-      const res = await getPosts(
-        { queryStringParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getPosts({ queryStringParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(200);
 
       const posts = JSON.parse(res.body);
@@ -181,11 +177,7 @@ describe("posts CRUD handlers", () => {
 
   describe("createPost", () => {
     it("should return 400 if no content, media, or pdfUrl provided", async () => {
-      const res = await createPost(
-        { body: JSON.stringify({}) } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await createPost({ body: JSON.stringify({}) } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -240,32 +232,20 @@ describe("posts CRUD handlers", () => {
 
   describe("sharePost", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await sharePost(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await sharePost({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
     it("should increment sharesCount on success", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Attributes: { sharesCount: 3 } });
-      const res = await sharePost(
-        { pathParameters: { id: "p-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await sharePost({ pathParameters: { id: "p-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.body).sharesCount).toBe(3);
     });
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Share post error"));
-      const res = await sharePost(
-        { pathParameters: { id: "p-1" } } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await sharePost({ pathParameters: { id: "p-1" } } as any, {} as any, () => {});
       expect(res.statusCode).toBe(500);
     });
   });

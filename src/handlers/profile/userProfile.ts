@@ -1,15 +1,19 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { GetCommand, PutCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName, headers, enrichProfileItem } from "./common";
+import { extractAuthContext } from "../../utils/authHelper";
+import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 
 export const getProfile: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
-    if (!id) {
+    if (!id || !safeIdSchema.safeParse(id).success) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing path parameter 'id'" }),
+        body: JSON.stringify({
+          error: "Missing or invalid path parameter 'id'",
+        }),
       };
     }
 
@@ -48,15 +52,21 @@ export const getProfile: APIGatewayProxyHandler = async (event) => {
 export const updateProfile: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
-    if (!id) {
+    if (!id || !safeIdSchema.safeParse(id).success) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing path parameter 'id'" }),
+        body: JSON.stringify({
+          error: "Missing or invalid path parameter 'id'",
+        }),
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
 
     // Fetch existing profile to preserve key properties
     const existing = await docClient.send(
@@ -76,21 +86,10 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
       estadoCuenta: "ACTIVO",
     };
 
-    const callerId =
-      (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
-      (event.requestContext as any)?.authorizer?.principalId ||
-      event.headers?.["x-user-id"] ||
-      "";
-
-    const callerRole = (
-      (event.requestContext as any)?.authorizer?.role ||
-      (event.requestContext as any)?.authorizer?.jwt?.claims?.["custom:role"] ||
-      event.headers?.["x-user-role"] ||
-      ""
-    ).toUpperCase();
-
-    const isPrivileged = callerRole === "ADMIN" || callerRole === "MODERATOR";
-    const isOwner = !callerId || callerId === id;
+    const auth = await extractAuthContext(event);
+    const callerId = auth.userId;
+    const isPrivileged = auth.isAdmin || auth.isModerator;
+    const isOwner = Boolean(callerId) && callerId === id;
 
     if (!isOwner && !isPrivileged) {
       return {
@@ -159,11 +158,8 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
 
 export const listProfiles: APIGatewayProxyHandler = async (event) => {
   try {
-    const roleParam =
-      event.queryStringParameters?.tipoUsuario ||
-      event.queryStringParameters?.role;
-    const queryParam =
-      event.queryStringParameters?.q || event.queryStringParameters?.query;
+    const roleParam = event.queryStringParameters?.tipoUsuario || event.queryStringParameters?.role;
+    const queryParam = event.queryStringParameters?.q || event.queryStringParameters?.query;
 
     let keyConditionExpression = "GSI1PK = :gsiPk";
     const expressionValues: Record<string, any> = {
@@ -184,35 +180,23 @@ export const listProfiles: APIGatewayProxyHandler = async (event) => {
       }),
     );
 
-    let items = result.Items || [];
+    let profiles = (result.Items || []).map((item) => enrichProfileItem(item));
 
-    if (queryParam && queryParam.trim() !== "") {
-      const q = queryParam.toLowerCase().trim();
-      items = items.filter((item: any) => {
-        const name = (
-          item.nombre ||
-          item.nombreComercial ||
-          item.name ||
-          ""
-        ).toLowerCase();
-        const razon = (item.razonSocial || "").toLowerCase();
-        const taxId = (item.taxId || item.rfc || "").toLowerCase();
-        const sector = (item.sector || "").toLowerCase();
-        return (
-          name.includes(q) ||
-          razon.includes(q) ||
-          taxId.includes(q) ||
-          sector.includes(q)
-        );
-      });
+    if (queryParam) {
+      const q = queryParam.toLowerCase();
+      profiles = profiles.filter(
+        (p) =>
+          (p.nombre && p.nombre.toLowerCase().includes(q)) ||
+          (p.email && p.email.toLowerCase().includes(q)) ||
+          (p.titular && p.titular.toLowerCase().includes(q)) ||
+          (p.sector && p.sector.toLowerCase().includes(q)),
+      );
     }
-
-    const enrichedItems = items.map((i: any) => enrichProfileItem(i));
 
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify(enrichedItems),
+      body: JSON.stringify(profiles),
     };
   } catch (error: unknown) {
     return {

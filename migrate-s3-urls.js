@@ -1,9 +1,5 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const {
-  DynamoDBDocumentClient,
-  ScanCommand,
-  PutCommand,
-} = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, ScanCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
 
 const client = new DynamoDBClient({ region: "us-east-1" });
 const docClient = DynamoDBDocumentClient.from(client);
@@ -86,9 +82,7 @@ async function runMigration() {
     lastEvaluatedKey = scanRes.LastEvaluatedKey;
   } while (lastEvaluatedKey);
 
-  console.log(
-    `Migration Complete! Total Scanned: ${totalScanned}, Total Updated: ${totalUpdated}`,
-  );
+  console.log(`Migration Complete! Total Scanned: ${totalScanned}, Total Updated: ${totalUpdated}`);
 }
 
 runMigration().catch((err) => {

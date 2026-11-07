@@ -57,14 +57,10 @@ export function detectAnomalousConcurrency(
   const detectedAnomalies: DetectedAnomaly[] = [];
 
   // 1. Analyze vacancies concurrency per organization (< 1 hour window, threshold > 10)
-  const orgVacanciesMap: Record<
-    string,
-    { companyName: string; dates: number[] }
-  > = {};
+  const orgVacanciesMap: Record<string, { companyName: string; dates: number[] }> = {};
 
   vacanciesItems.forEach((vac) => {
-    const orgId =
-      vac.empresaUuid || vac.companyId || vac.company || "unknown";
+    const orgId = vac.empresaUuid || vac.companyId || vac.company || "unknown";
     const orgName = vac.company || vac.empresaNombre || "Organización";
     const createdAtStr = vac.fechaCreacion || vac.createdAt;
     if (createdAtStr) {
@@ -83,9 +79,7 @@ export function detectAnomalousConcurrency(
     for (let i = 0; i < data.dates.length; i++) {
       const windowStart = data.dates[i];
       const windowEnd = windowStart + oneHourMs;
-      const countInWindow = data.dates.filter(
-        (d) => d >= windowStart && d <= windowEnd,
-      ).length;
+      const countInWindow = data.dates.filter((d) => d >= windowStart && d <= windowEnd).length;
       if (countInWindow > 10) {
         detectedAnomalies.push({
           id: `anom-vac-${orgId}`,
@@ -108,8 +102,7 @@ export function detectAnomalousConcurrency(
   });
 
   // 2. Analyze reports concurrency per organization (< 1 hour window, threshold > 5)
-  const orgReportsMap: Record<string, { companyName: string; dates: number[] }> =
-    {};
+  const orgReportsMap: Record<string, { companyName: string; dates: number[] }> = {};
 
   incidentItems.forEach((inc) => {
     const orgId = inc.companyId || inc.empresaUuid || inc.targetId || "unknown";
@@ -131,9 +124,7 @@ export function detectAnomalousConcurrency(
     for (let i = 0; i < data.dates.length; i++) {
       const windowStart = data.dates[i];
       const windowEnd = windowStart + oneHourMs;
-      const countInWindow = data.dates.filter(
-        (d) => d >= windowStart && d <= windowEnd,
-      ).length;
+      const countInWindow = data.dates.filter((d) => d >= windowStart && d <= windowEnd).length;
       if (countInWindow > 5) {
         detectedAnomalies.push({
           id: `anom-rep-${orgId}`,

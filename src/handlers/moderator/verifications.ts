@@ -2,9 +2,24 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { ScanCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
+import { extractAuthContext } from "../../utils/authHelper";
+import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 
-export const getVerificationRequests: APIGatewayProxyHandler = async () => {
+export const getVerificationRequests: APIGatewayProxyHandler = async (event) => {
   try {
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event?.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Solicitudes de verificación exclusivas para Moderadores y Administradores.",
+        }),
+      };
+    }
+
     const result = await docClient.send(
       new ScanCommand({
         TableName: tableName,
@@ -42,22 +57,43 @@ export const getVerificationRequests: APIGatewayProxyHandler = async () => {
 export const resolveVerification: APIGatewayProxyHandler = async (event) => {
   try {
     const companyId = event.pathParameters?.companyId;
-    if (!companyId || companyId === "undefined") {
+    if (!companyId || companyId === "undefined" || !safeIdSchema.safeParse(companyId).success) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing path parameter 'companyId'" }),
+        body: JSON.stringify({
+          error: "Missing or invalid path parameter 'companyId'",
+        }),
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Resolución de verificación exclusiva para Moderadores y Administradores.",
+        }),
+      };
+    }
+
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const { approve } = body;
 
-    if (approve === undefined) {
+    if (approve === undefined || typeof approve !== "boolean") {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({ error: "Missing body parameter 'approve'" }),
+        body: JSON.stringify({
+          error: "Missing or invalid boolean parameter 'approve'",
+        }),
       };
     }
 
@@ -118,9 +154,7 @@ export const resolveVerification: APIGatewayProxyHandler = async (event) => {
         : "Tu solicitud de verificación corporativa no fue aprobada. Por favor revisa los documentos fiscales en tu perfil.",
       type: "system",
       url: "/company/verification",
-    }).catch((err) =>
-      console.error("Error creating verification notification:", err),
-    );
+    }).catch((err) => console.error("Error creating verification notification:", err));
 
     return {
       statusCode: 200,

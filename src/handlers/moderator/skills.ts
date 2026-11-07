@@ -24,8 +24,7 @@ export function getLevenshteinDistance(a: string, b: string): number {
       tmp[i][j] = Math.min(
         tmp[i - 1][j] + 1,
         tmp[i][j - 1] + 1,
-        tmp[i - 1][j - 1] +
-          (a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1),
+        tmp[i - 1][j - 1] + (a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1),
       );
     }
   }
@@ -64,21 +63,13 @@ export const getSuggestedSkills: APIGatewayProxyHandler = async (event) => {
     const catalogItems = catalogResult.Items || [];
 
     let suggestions = (suggestionsResult.Items || []).map((item: any) => {
-      const isSector =
-        item.PK.startsWith("SUGGESTION#SECTOR#") || item.category === "Sector";
-      const itemCategory: "Habilidad" | "Sector" = isSector
-        ? "Sector"
-        : "Habilidad";
-      const id = item.PK.replace("SUGGESTION#SKILL#", "").replace(
-        "SUGGESTION#SECTOR#",
-        "",
-      );
+      const isSector = item.PK.startsWith("SUGGESTION#SECTOR#") || item.category === "Sector";
+      const itemCategory: "Habilidad" | "Sector" = isSector ? "Sector" : "Habilidad";
+      const id = item.PK.replace("SUGGESTION#SKILL#", "").replace("SUGGESTION#SECTOR#", "");
       const name = item.name || "";
 
       // Find similarity matches in the same category
-      const sameCatCatalog = catalogItems.filter(
-        (cat: any) => cat.category === itemCategory,
-      );
+      const sameCatCatalog = catalogItems.filter((cat: any) => cat.category === itemCategory);
       const duplicateMatch = sameCatCatalog.find((cat: any) => {
         if (cat.name.toLowerCase() === name.toLowerCase()) return true;
         const dist = getLevenshteinDistance(cat.name, name);
@@ -128,8 +119,7 @@ export const createSkillSuggestion: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const isSector =
-      category === "Sector" || (event.path && event.path.includes("/sectors/"));
+    const isSector = category === "Sector" || (event.path && event.path.includes("/sectors/"));
     const cat = isSector ? "Sector" : "Habilidad";
     const pkPrefix = isSector ? "SUGGESTION#SECTOR#" : "SUGGESTION#SKILL#";
 
@@ -225,8 +215,7 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
     const suggestion = existing.Item;
     const itemName = suggestion.name;
     const itemCategory: "Habilidad" | "Sector" =
-      suggestion.category ||
-      (suggestion.PK.includes("#SECTOR#") ? "Sector" : "Habilidad");
+      suggestion.category || (suggestion.PK.includes("#SECTOR#") ? "Sector" : "Habilidad");
 
     if (approve) {
       // Unification mode: REPLACE_EXISTING (replace existing master catalog name with suggested name)
@@ -252,8 +241,7 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
             new UpdateCommand({
               TableName: tableName,
               Key: { PK: targetCatalogItem.PK, SK: "CATALOG" },
-              UpdateExpression:
-                "SET #n = :newName, valName = :valName, updatedAt = :u",
+              UpdateExpression: "SET #n = :newName, valName = :valName, updatedAt = :u",
               ExpressionAttributeNames: { "#n": "name" },
               ExpressionAttributeValues: {
                 ":newName": itemName,

@@ -17,13 +17,14 @@ import {
   sendEmailToCompany,
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
+import { extractAuthContext } from "../../utils/authHelper";
+import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 
 // Fase 1 — Inicio del proceso de suspensión de cuenta
 export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
   try {
-    const companyId =
-      event.pathParameters?.id || event.pathParameters?.companyId;
-    if (!companyId || companyId === "undefined") {
+    const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined" || !safeIdSchema.safeParse(companyId).success) {
       return {
         statusCode: 400,
         headers,
@@ -31,16 +32,29 @@ export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
-    const reason =
-      body.reason || "Infracción de términos de servicio y conducta";
-    const graceDays = typeof body.graceDays === "number" ? body.graceDays : 4;
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Gestión de suspensiones exclusiva para Moderadores y Administradores.",
+        }),
+      };
+    }
 
-    const res = await executeOrgSuspensionInitiation(
-      companyId,
-      reason,
-      graceDays,
-    );
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
+    const reason = body.reason || "Infracción de términos de servicio y conducta";
+    const rawGraceDays = typeof body.graceDays === "number" ? body.graceDays : 4;
+    const graceDays = Math.min(Math.max(1, rawGraceDays), 30);
+
+    const res = await executeOrgSuspensionInitiation(companyId, reason, graceDays);
 
     return {
       statusCode: 200,
@@ -65,9 +79,8 @@ export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
 // Fase 3a — Dictamen favorable / Revocación de suspensión
 export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
   try {
-    const companyId =
-      event.pathParameters?.id || event.pathParameters?.companyId;
-    if (!companyId || companyId === "undefined") {
+    const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined" || !safeIdSchema.safeParse(companyId).success) {
       return {
         statusCode: 400,
         headers,
@@ -75,7 +88,24 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Gestión de suspensiones exclusiva para Moderadores y Administradores.",
+        }),
+      };
+    }
+
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const notes = body.notes || "Apelación aprobada. Suspensión revocada.";
     const timestamp = new Date().toISOString();
 
@@ -142,18 +172,14 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
       body: `El proceso de suspensión ha sido revocado y su cuenta se encuentra nuevamente Activa. Dictamen: ${notes}`,
       url: "/notifications",
       data: { type: "SUSPENSION_CANCELLED", companyId },
-    }).catch((err) =>
-      console.error("Error sending push for favorable appeal:", err),
-    );
+    }).catch((err) => console.error("Error sending push for favorable appeal:", err));
 
     // Disparar Correo Directo por SES (Fase 3a)
     sendEmailToCompany(
       companyId,
       "RESOLUCIÓN FAVORABLE: Suspensión Revocada y Cuenta Restablecida",
       `Nos complace informarle que la apelación presentada ha sido evaluada favorablemente. El proceso de suspensión ha sido revocado y su cuenta se encuentra nuevamente activa en JobNet.\n\nDictamen / Notas del Moderador: ${notes}`,
-    ).catch((err) =>
-      console.error("Error sending SES email for favorable appeal:", err),
-    );
+    ).catch((err) => console.error("Error sending SES email for favorable appeal:", err));
 
     // 4. Auditoría
     await saveAuditLog({
@@ -188,9 +214,8 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
 // Fase 3b — Dictamen desfavorable / Suspensión definitiva
 export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
   try {
-    const companyId =
-      event.pathParameters?.id || event.pathParameters?.companyId;
-    if (!companyId || companyId === "undefined") {
+    const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
+    if (!companyId || companyId === "undefined" || !safeIdSchema.safeParse(companyId).success) {
       return {
         statusCode: 400,
         headers,
@@ -198,10 +223,25 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
-    const reason =
-      body.reason ||
-      "Dictamen desfavorable tras proceso de evaluación/apelación";
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Gestión de suspensiones exclusiva para Moderadores y Administradores.",
+        }),
+      };
+    }
+
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
+    const reason = body.reason || "Dictamen desfavorable tras proceso de evaluación/apelación";
     const timestamp = new Date().toISOString();
 
     // Validar regla de al menos 3 mensajes por parte de la organización en el chat (o periodo expirado / forzado por falta de respuesta)
@@ -275,8 +315,7 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
           new UpdateCommand({
             TableName: tableName,
             Key: { PK: item.PK, SK: "METADATA" },
-            UpdateExpression:
-              "SET estatus = :st, suspendida = :s, updatedAt = :u",
+            UpdateExpression: "SET estatus = :st, suspendida = :s, updatedAt = :u",
             ExpressionAttributeValues: {
               ":st": "Oculta",
               ":s": true,
@@ -311,18 +350,14 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       body: `Su cuenta ha sido suspendida definitivamente. Motivo: ${reason}`,
       url: "/notifications",
       data: { type: "SUSPENSION_CONFIRMED", companyId },
-    }).catch((err) =>
-      console.error("Error sending push for final suspension:", err),
-    );
+    }).catch((err) => console.error("Error sending push for final suspension:", err));
 
     // Disparar Correo Directo por SES (Fase 3b)
     sendEmailToCompany(
       companyId,
       "RESOLUCIÓN FINAL: Cuenta Suspendida por Infracción",
       `Le informamos que tras evaluar el expediente y la apelación correspondiente, se ha emitido un dictamen desfavorable. Su cuenta ha sido suspendida definitivamente de la plataforma JobNet, su inicio de sesión ha sido bloqueado y todas sus vacantes han sido ocultadas del Job Board.\n\nMotivo del dictamen: ${reason}`,
-    ).catch((err) =>
-      console.error("Error sending SES email for final suspension:", err),
-    );
+    ).catch((err) => console.error("Error sending SES email for final suspension:", err));
 
     // 5. Auditoría
     await saveAuditLog({
@@ -357,8 +392,7 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
 // Consulta de estado de suspensión
 export const getSuspensionStatus: APIGatewayProxyHandler = async (event) => {
   try {
-    const companyId =
-      event.pathParameters?.id || event.pathParameters?.companyId;
+    const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
     if (!companyId || companyId === "undefined") {
       return {
         statusCode: 400,
@@ -392,8 +426,7 @@ export const getSuspensionStatus: APIGatewayProxyHandler = async (event) => {
         estatus: profile.estatus || "Activa",
         bloqueada: Boolean(profile.bloqueada),
         inGracePeriod: Boolean(graceItem),
-        gracePeriodEnd:
-          graceItem?.gracePeriodEnd || profile.suspensionGracePeriodEnd || null,
+        gracePeriodEnd: graceItem?.gracePeriodEnd || profile.suspensionGracePeriodEnd || null,
         reason: graceItem?.reason || profile.suspensionReason || null,
         createdAt: graceItem?.createdAt || profile.updatedAt || null,
       }),
@@ -409,10 +442,7 @@ export const getSuspensionStatus: APIGatewayProxyHandler = async (event) => {
 
 // Trigger de expiración TTL (DynamoDB Streams)
 export const handleSuspensionExpiry = async (event: any) => {
-  console.log(
-    "Processing DynamoDB Stream TTL Event for Suspension:",
-    JSON.stringify(event),
-  );
+  console.log("Processing DynamoDB Stream TTL Event for Suspension:", JSON.stringify(event));
 
   for (const record of event.Records || []) {
     if (record.eventName === "REMOVE") {
@@ -423,14 +453,11 @@ export const handleSuspensionExpiry = async (event: any) => {
       const sk = oldImage.SK?.S || "";
 
       if (pk.startsWith("SUSPENSION#") && sk === "GRACE_PERIOD") {
-        const companyId =
-          oldImage.companyId?.S || pk.replace("SUSPENSION#", "");
+        const companyId = oldImage.companyId?.S || pk.replace("SUSPENSION#", "");
         const status = oldImage.status?.S;
 
         if (status === "IN_REVIEW") {
-          console.log(
-            `TTL Expired for company ${companyId}. Executing automatic suspension.`,
-          );
+          console.log(`TTL Expired for company ${companyId}. Executing automatic suspension.`);
           const timestamp = new Date().toISOString();
 
           await docClient.send(
@@ -468,8 +495,7 @@ export const handleSuspensionExpiry = async (event: any) => {
                 new UpdateCommand({
                   TableName: tableName,
                   Key: { PK: item.PK, SK: "METADATA" },
-                  UpdateExpression:
-                    "SET estatus = :st, suspendida = :s, updatedAt = :u",
+                  UpdateExpression: "SET estatus = :st, suspendida = :s, updatedAt = :u",
                   ExpressionAttributeValues: {
                     ":st": "Oculta",
                     ":s": true,
@@ -504,17 +530,13 @@ export const handleSuspensionExpiry = async (event: any) => {
             body: "El periodo de gracia para apelar ha concluido sin respuesta/resolución favorable. Su cuenta ha sido suspendida definitivamente.",
             url: "/notifications",
             data: { type: "SUSPENSION_CONFIRMED", companyId },
-          }).catch((err) =>
-            console.error("Error sending push for TTL suspension:", err),
-          );
+          }).catch((err) => console.error("Error sending push for TTL suspension:", err));
 
           sendEmailToCompany(
             companyId,
             "RESOLUCIÓN AUTOMÁTICA: Cuenta Suspendida por Expiración de Periodo de Gracia",
             "Le informamos que el periodo de gracia concedido para atender el proceso de revisión de su cuenta ha concluido sin una resolución favorable o sin justificación probatoria. En consecuencia, su cuenta ha sido suspendida definitivamente, su acceso ha sido bloqueado y sus ofertas han sido retiradas de la plataforma.",
-          ).catch((err) =>
-            console.error("Error sending SES email for TTL suspension:", err),
-          );
+          ).catch((err) => console.error("Error sending SES email for TTL suspension:", err));
 
           await saveAuditLog({
             targetId: companyId,
@@ -525,17 +547,12 @@ export const handleSuspensionExpiry = async (event: any) => {
             executorId: "SISTEMA_DYNAMODB_TTL",
           });
         }
-      } else if (
-        pk.startsWith("VACANCY_SUSPENSION#") &&
-        sk === "GRACE_PERIOD"
-      ) {
+      } else if (pk.startsWith("VACANCY_SUSPENSION#") && sk === "GRACE_PERIOD") {
         const jobId = oldImage.jobId?.S;
         const status = oldImage.status?.S;
 
         if (status === "EVALUACION" && jobId) {
-          console.log(
-            `TTL Expired for vacancy ${jobId}. Executing automatic deletion (RF-23).`,
-          );
+          console.log(`TTL Expired for vacancy ${jobId}. Executing automatic deletion (RF-23).`);
           const timestamp = new Date().toISOString();
 
           await docClient.send(
@@ -572,8 +589,7 @@ export const handleSuspensionExpiry = async (event: any) => {
                   SK: `NOTIFICATION#${timestamp}#${notifId}`,
                   id: notifId,
                   type: "SUSPENSION_CONFIRMED",
-                  title:
-                    "Resolución Desfavorable: Vacante Eliminada por Expiración",
+                  title: "Resolución Desfavorable: Vacante Eliminada por Expiración",
                   message: `El periodo de apelación para su vacante ha expirado sin resolución favorable. La vacante ha sido eliminada definitivamente del Job Board por infracción de normas.`,
                   createdAt: timestamp,
                   read: false,

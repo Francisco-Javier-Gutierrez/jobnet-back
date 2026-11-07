@@ -82,11 +82,7 @@ describe("moderator suspensions handlers", () => {
 
   describe("initiateSuspension", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await initiateSuspension(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await initiateSuspension({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -145,11 +141,7 @@ describe("moderator suspensions handlers", () => {
 
   describe("cancelSuspension", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await cancelSuspension(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await cancelSuspension({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -168,11 +160,7 @@ describe("moderator suspensions handlers", () => {
 
     it("should cancel suspension successfully when org has 3+ messages", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // 3 messages
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand grace period
       mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand profile
@@ -199,11 +187,7 @@ describe("moderator suspensions handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // getOrgAppealMessageCount succeeds with 3 messages
       mockDynamoSend.mockRejectedValueOnce(new Error("Cancel DB error")); // Next DB operation fails
 
@@ -215,11 +199,7 @@ describe("moderator suspensions handlers", () => {
 
   describe("confirmSuspension", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await confirmSuspension(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await confirmSuspension({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -238,11 +218,7 @@ describe("moderator suspensions handlers", () => {
 
     it("should confirm suspension, block account, and hide jobs", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // 3 messages
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand grace period
       mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand profile
@@ -266,11 +242,7 @@ describe("moderator suspensions handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // getOrgAppealMessageCount succeeds with 3 messages
       mockDynamoSend.mockRejectedValueOnce(new Error("Confirm DB error")); // Next DB operation fails
 
@@ -282,11 +254,7 @@ describe("moderator suspensions handlers", () => {
 
   describe("getSuspensionStatus", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await getSuspensionStatus(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getSuspensionStatus({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 

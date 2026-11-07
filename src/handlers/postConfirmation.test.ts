@@ -138,9 +138,7 @@ describe("postConfirmation handler", () => {
     const event = createEvent("EMPRESA", "Fraud Corp");
     event.request.userAttributes.email = "recruiter@fraudcorp.com";
 
-    await expect(handler(event, {} as never, () => {})).rejects.toThrow(
-      /RF-74/,
-    );
+    await expect(handler(event, {} as never, () => {})).rejects.toThrow(/RF-74/);
   });
 
   it("should process ADMIN user correctly", async () => {
@@ -168,9 +166,7 @@ describe("postConfirmation handler", () => {
   it("should gracefully handle DynamoDB errors", async () => {
     const event = createEvent("CANDIDATO", "Test");
     mockDynamoSend.mockRejectedValueOnce(new Error("DynamoDB Error"));
-    await expect(handler(event, {} as never, () => {})).rejects.toThrow(
-      "DynamoDB Error",
-    );
+    await expect(handler(event, {} as never, () => {})).rejects.toThrow("DynamoDB Error");
   });
 
   it("should skip DynamoDB insert if TABLE_NAME is undefined", async () => {
@@ -300,7 +296,9 @@ describe("postConfirmation handler", () => {
     expect(res).toBeDefined();
 
     const putCall = mockDynamoSend.mock.calls.find(
-      (c) => c[0]?.constructor?.name === "PutCommand" || c[0]?.input?.Item?.PK === "USER#google-sub-12345",
+      (c) =>
+        c[0]?.constructor?.name === "PutCommand" ||
+        c[0]?.input?.Item?.PK === "USER#google-sub-12345",
     );
     expect(putCall).toBeDefined();
     const savedItem = putCall[0].input.Item;

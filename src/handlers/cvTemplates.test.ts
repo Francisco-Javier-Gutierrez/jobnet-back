@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  getCvTemplates,
-  createCvTemplate,
-  deleteCvTemplate,
-  useCvTemplate,
-} from "./cvTemplates";
+import { getCvTemplates, createCvTemplate, deleteCvTemplate, useCvTemplate } from "./cvTemplates";
 import { docClient } from "./profile/common";
 
 vi.mock("./profile/common", () => ({
@@ -54,7 +49,7 @@ describe("Community CV Templates Backend Handlers", () => {
         queryStringParameters: { idioma: "es" },
       };
 
-      const result = await getCvTemplates(event, {} as any, () => {}) as any;
+      const result = (await getCvTemplates(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(200);
       const data = JSON.parse(result.body);
       expect(data.count).toBe(1);
@@ -69,7 +64,7 @@ describe("Community CV Templates Backend Handlers", () => {
         body: JSON.stringify({ titulo: "Test", rol: "Dev", categoria: "tech" }),
       };
 
-      const result = await createCvTemplate(event, {} as any, () => {}) as any;
+      const result = (await createCvTemplate(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(401);
     });
 
@@ -79,7 +74,7 @@ describe("Community CV Templates Backend Handlers", () => {
         body: JSON.stringify({ titulo: "Only Title" }),
       };
 
-      const result = await createCvTemplate(event, {} as any, () => {}) as any;
+      const result = (await createCvTemplate(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(400);
     });
 
@@ -98,7 +93,7 @@ describe("Community CV Templates Backend Handlers", () => {
         }),
       };
 
-      const result = await createCvTemplate(event, {} as any, () => {}) as any;
+      const result = (await createCvTemplate(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(201);
       const data = JSON.parse(result.body);
       expect(data.PK).toMatch(/^CV_TEMPLATE#/);
@@ -125,7 +120,7 @@ describe("Community CV Templates Backend Handlers", () => {
         headers: { "x-user-id": "hacker-123" },
       };
 
-      const result = await deleteCvTemplate(event, {} as any, () => {}) as any;
+      const result = (await deleteCvTemplate(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(403);
     });
 
@@ -145,7 +140,7 @@ describe("Community CV Templates Backend Handlers", () => {
         headers: { "x-user-id": "owner-123" },
       };
 
-      const result = await deleteCvTemplate(event, {} as any, () => {}) as any;
+      const result = (await deleteCvTemplate(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(200);
       const data = JSON.parse(result.body);
       expect(data.success).toBe(true);
@@ -164,7 +159,7 @@ describe("Community CV Templates Backend Handlers", () => {
         pathParameters: { id: "template-abc" },
       };
 
-      const result = await useCvTemplate(event, {} as any, () => {}) as any;
+      const result = (await useCvTemplate(event, {} as any, () => {})) as any;
       expect(result.statusCode).toBe(200);
       const data = JSON.parse(result.body);
       expect(data.usesCount).toBe(42);

@@ -1,110 +1,129 @@
-# Reglas del Proyecto y Flujos de Trabajo (JobNet)
+# Reglas del Proyecto y Flujos de Trabajo (JobNet Backend)
 
-¡Bienvenido al equipo! Para mantener una alta calidad de código y asegurar que los despliegues sean estables, hemos implementado una serie de reglas estrictas y flujos de integración continua (CI/CD) que todos los desarrolladores deben seguir.
+¡Bienvenido al backend de JobNet! Para mantener la máxima calidad de código, prevenir vulnerabilidades de seguridad y asegurar despliegues confiables hacia AWS (Lambda, DynamoDB, API Gateway, S3, Cognito), hemos establecido una serie de estándares estrictos, candados de seguridad en Git y pipelines automatizados de CI/CD.
 
-Por favor, lee con detenimiento este documento antes de comenzar a programar.
+Por favor, lee con detenimiento este documento antes de programar o modificar cualquier componente del backend.
 
 ---
 
 ## 1. Ramas y GitFlow
 
-- **`develop`**: Es la rama base de integración. **Todos los despliegues automáticos** (hacia el entorno de desarrollo/testing) ocurren cuando se hace un merge hacia esta rama.
-- **`main`**: Actualmente está **deshabilitada para despliegues automáticos**. No hagas merge a `main` a menos que se indique explícitamente para una versión de producción oficial.
-- **Ramas de trabajo**: Crea siempre ramas partiendo de `develop` con los prefijos:
+- **`develop`**: Es la rama base de integración. **Todos los despliegues automáticos** de desarrollo/staging ocurren cuando se hace un merge hacia esta rama.
+- **`main`**: Es la rama blindada de producción. **Está terminantemente prohibido hacer push directo a `main`**.
+  - La rama `main` solo puede recibir actualizaciones automáticas aprobadas por el pipeline de auditoría de Jenkins (`npm run jenkins`), el cual inyecta la variable de entorno de autorización `JENKINS_GATEKEEPER_APPROVED=true`.
+- **Ramas de trabajo**: Crea siempre ramas partiendo de `develop` con la nomenclatura:
   - `feature/nombre-de-la-feature`
   - `fix/nombre-del-error`
+- **Creación de Pull Requests (PR)**:
+  - **Los PRs se deben hacer siempre con destino a `develop` y nunca a `main`**.
+  - Si el dispositivo cuenta con la CLI de GitHub (`gh`), crea el PR automáticamente mediante `gh pr create --base develop`.
 - **Aislamiento Estricto de Ramas Mock y Datos de Prueba**:
-  - Las ramas de datos mock y herramientas de simulación (por ejemplo `feature/mock-*`) son **únicamente para sus ramas dedicadas**, no para el proyecto general.
-  - **JAMÁS deben ser mergeadas ni a `main` ni a `develop`**.
-  - Las ramas `develop` y `main` deben permanecer estrictamente limpias de devtools de mock, inyecciones ficticias de sesión o datos simulados no autorizados.
+  - Las ramas de datos simulados (e.g. `feature/mock-*`) son exclusivamente para sus ramas aisladas.
+  - **JAMÁS deben ser mergeadas ni a `develop` ni a `main`**.
 
 ---
 
-## 2. Integración Continua (CI)
+## 2. Git Hooks de Protección (`.githooks`)
 
-Hemos configurado un Action de GitHub (`ci.yml`) que se dispara automáticamente cuando haces `push` a una rama `feature/*` o `fix/*`, y al abrir un Pull Request hacia `develop` o `main`.
+Para garantizar que ningún código roto o vulnerable ingrese al repositorio, el backend cuenta con Git Hooks automáticos:
 
-El CI ejecutará una serie de validaciones secuenciales. **Si tu código falla en alguna de ellas, el Pull Request será bloqueado.**
+1. **`pre-commit`**:
+   - Se ejecuta antes de generar cualquier commit local.
+   - Dispara automáticamente `npm run check`. Si el linter, los tipos, el formato o las pruebas fallan, el commit es abortado de inmediato.
+2. **`pre-push`**:
+   - Valida el destino del push. Si el desarrollador intenta hacer `git push origin main`, el hook bloquea la operación e indica que debe ejecutarse `npm run jenkins`.
+   - Ejecuta `npm run check` para revalidar la integridad del código antes de subirlo a GitHub.
 
-Para asegurarte de que tu código pasará el CI, puedes (y debes) ejecutar los siguientes comandos localmente antes de hacer push:
-
-### A. Formato de Código (Prettier)
-
-Usamos **Prettier** para estandarizar el formato de todos los archivos y evitar discusiones sobre estilos.
-
-- Para verificar el formato: `npm run format:check`
-- Para arreglar todos los archivos automáticamente: `npm run format` (Haz esto antes del commit).
-
-### B. Linting (ESLint)
-
-Usamos **ESLint** para detectar malas prácticas y errores lógicos en el código.
-
-- Comando: `npm run lint`
-- Todos los errores de linter deben ser resueltos. No silencies reglas globales a menos que haya una justificación arquitectónica aprobada.
-
-### C. Tipado Estricto (TypeScript)
-
-El proyecto usa TypeScript de forma estricta. No se permite el uso de variables sin tipar ni el abuso excesivo de `any`.
-
-- Comando frontend: `npm run typecheck` (`vue-tsc --noEmit`)
-- Comando backend: `npm run typecheck` (`tsc --noEmit`)
-- El CI fallará si existen errores de tipos.
-
-### D. Pruebas Unitarias y Cobertura (Vitest)
-
-Hemos configurado **Vitest** con un umbral de cobertura estricto.
-
-- **Cobertura requerida: 100%**.
-- Esto incluye **Líneas, Funciones, Ramas (if/else) y Declaraciones (Statements)**.
-- Todas las funciones (backend) y componentes importantes (frontend) deben contar con su respectivo archivo de prueba (`.test.ts` o `.spec.ts`).
-- Comando para ejecutar las pruebas: `npm run test`
-- Comando para verificar la cobertura localmente: `npm run test:coverage`
-
-### E. Construcción (Build)
-
-El último paso del CI valida que la aplicación compile correctamente sin errores.
-
-- Comando: `npm run build`
-
----
-
-## 3. Resumen de comandos antes de hacer Push
-
-Antes de subir tus cambios a GitHub, acostúmbrate a correr este ciclo en tu terminal:
+Para activar los hooks localmente (se configura automáticamente al clonar/instalar):
 
 ```bash
-npm run format
-npm run lint
-npm run typecheck
-npm run test:coverage
-npm run build
+git config core.hooksPath .githooks
+# O mediante el comando de npm:
+npm run prepare
 ```
-
-Si todo sale verde, ¡tu código está listo para revisión y posterior despliegue automático a `develop`!
 
 ---
 
-## 4. Reglas de Arquitectura y Base de Datos (DynamoDB & Cognito)
+## 3. Jenkins Quality Gatekeeper (`npm run jenkins`)
 
-Para asegurar la integridad de la base de datos y la consistencia de los datos en JobNet, se deben seguir las siguientes directrices arquitectónicas:
+Para publicar cambios a producción en la rama `main`:
 
-### A. Paradigma NoSQL y Single Table Design (STD)
+```bash
+npm run jenkins
+```
 
-- **Tabla Única**: Todas las entidades (Usuarios, Vacantes, Chats, Publicaciones, Notificaciones) coexisten en la misma tabla física de DynamoDB.
-- **Prefijos de Claves**:
-  - **Partition Key (PK)**: Debe tener siempre el formato prefijado de la entidad (ej. `USER#<userUuid>`, `VACANCY#<vacancyUuid>`, `CHAT#<chatUuid>`, `POST#<postUuid>`).
-  - **Sort Key (SK)**: Debe definir lógicamente la partición (ej. `PROFILE` para el perfil, `METADATA` para configuraciones, `MSG#<timestamp>` para mensajes).
-- **Ausencia de Campos Nulos**: Debido a que DynamoDB es NoSQL sin esquema rígido, **no se deben guardar campos vacíos o nulos** en la base de datos. Si un atributo no le pertenece a un rol o está vacío, simplemente no debe existir en su registro.
+Este comando ejecuta de forma automatizada:
 
-### B. Mapeo de Roles de Usuario y Cognito Scopes
+1. **Validación local estricta**: corre `npm run check` (Prettier, ESLint, TypeScript, Vitest y Build).
+2. **Auto-commit y push a `develop`**: sincroniza la rama `develop` en GitHub con un push seguro (`--force-with-lease`).
+3. **Disparo del Pipeline en Jenkins Docker**:
+   - Conecta con `http://localhost:8080/job/jobnet-back`.
+   - Monitorea la cola y la ejecución de la auditoría en tiempo real.
+4. **Promoción Segura a `main`**:
+   - Si Jenkins aprueba todas las etapas (`SUCCESS`), desbloquea el candado `JENKINS_GATEKEEPER_APPROVED=true` y hace push a `origin main`.
+   - Si Jenkins detecta cualquier error, la rama `main` permanece intacta y protegida.
 
-- La autenticación y autorización se basan en **Cognito Scopes** (OAuth 2.0 Resource Server Scopes: `jobnet/admin`, `jobnet/moderator`, `jobnet/organization`, `jobnet/candidate`) y roles en base de datos (`ADMIN`, `MODERATOR`, `ORGANIZACION`, `CANDIDATO`).
-- Los antiguos grupos de Cognito (`Cognito Groups`) y triggers que dependían de ellos (como la asignación en `postConfirmation` o la sincronización en `preTokenGeneration`) han quedado **obsoletos**.
-- Al confirmar un registro, la Lambda `postConfirmation` persiste el perfil base en DynamoDB y valida las restricciones de dominio corporativo (RF-74), sin manipular grupos de Cognito.
+---
 
-### C. Desarrollo Local con Serverless Offline
+## 4. Validaciones de Entrada y Seguridad Estricta (Zod & Validator)
 
-- Para evitar errores del tipo `EADDRINUSE`, la configuración local debe mantener estrictamente separados los puertos de la siguiente forma:
-  - **HTTP:** Puerto `3001`
-  - **Websockets:** Puerto `3002`
-  - **Lambda Port:** Puerto `3003` (especificado en `lambdaPort` para evitar conflictos entre REST y Websockets).
+Tras las auditorías de seguridad del sistema, todas las Lambdas deben aplicar validación estricta de datos:
+
+### A. Uso Obligatorio de `src/utils/validator.ts` y Zod
+
+- **Cero `JSON.parse` desprotegidos**: Queda prohibido hacer `JSON.parse(event.body || "{}")` sin protección `try/catch`. Debe utilizarse siempre `parseJsonBody(event.body)` o `validateAndParse(schema, event.body)`, retornando `400 Bad Request` ante JSON inválido en lugar de generar un error 500 no controlado.
+- **Validación de Parámetros y Payloads**: Toda entrada proveniente de `queryStringParameters`, `pathParameters` o `body` debe ser validada contra esquemas de Zod antes de interactuar con DynamoDB o servicios externos.
+- **Helper schemas reutilizables**:
+  - `safeIdSchema`: Valida identificadores alfanuméricos seguros y UUIDs (evita inyecciones de clave en DynamoDB).
+  - `safeText(min, max)`: Valida cadenas sin caracteres peligrosos o tamaños desmedidos.
+  - `nonNegativeNumber`, `positiveInteger`: Valida métricas y paginaciones.
+
+### B. Autenticación y Autorización (`extractAuthContext`)
+
+- **Prohibido el bypass de desarrollo en producción**: No se permite escribir `if (!callerId) { // dummy fallback }` en handlers accesibles públicamente.
+- **Detección de Roles Confiable**:
+  - La verificación de identidad debe realizarse mediante `extractAuthContext(event)` leyendo los claims de Cognito (`authorizer.claims`).
+  - La cabecera `x-user-role` solo está permitida en entorno local offline (`IS_OFFLINE === "true"`). En producción debe ser ignorada para evitar suplantación de privilegios (Role Spoofing).
+- **Protección de Endpoints Críticos**:
+  - Endpoints administrativos (`/admin/*`) y de moderación (`/moderator/*`) deben verificar explícitamente el rol (`ADMIN` o `MODERATOR`) y rechazar peticiones no autorizadas con `403 Forbidden` o `401 Unauthorized`.
+
+---
+
+## 5. Reglas de Arquitectura y Base de Datos (DynamoDB & Serverless)
+
+### A. Single Table Design (STD)
+
+- **Tabla Única**: Todas las entidades del dominio (Usuarios, Vacantes, Chats, Publicaciones, Notificaciones, Reportes) coexisten en la misma tabla de DynamoDB.
+- **Estructura de Claves**:
+  - **PK (Partition Key)**: Prefijo de la entidad (ej. `USER#<uuid>`, `VACANCY#<uuid>`, `CHAT#<uuid>`, `POST#<uuid>`).
+  - **SK (Sort Key)**: Sub-entidad o tipo de registro (`PROFILE`, `METADATA`, `MSG#<timestamp>`, `LIKE#<userId>`).
+  - **GSIs**: Utilizar `GSI1PK`, `GSI1SK`, `GSI2PK`, `GSI2SK` para consultas secundarias indexadas.
+- **Ausencia de Atributos Nulos**: En DynamoDB no se deben almacenar propiedades con valor `null`, `undefined` o cadenas vacías `""`. Si un atributo opcional no existe, omítelo del objeto.
+
+### B. Puertos de Desarrollo Local (Serverless Offline)
+
+Para evitar colisiones de puertos (`EADDRINUSE`) al ejecutar simultáneamente el frontend, REST API y WebSockets:
+
+- **API REST (HTTP)**: Puerto `3001`
+- **WebSockets API**: Puerto `3002`
+- **Lambda Engine**: Puerto `3003`
+
+---
+
+## 6. Resumen de Comandos de Calidad
+
+Antes de hacer commit o push, asegúrate de que el ciclo de calidad se ejecute sin advertencias ni errores:
+
+```bash
+# Verificación unificada obligatoria:
+npm run check
+
+# Comandos individuales:
+npm run format:check   # Verifica el estilo de código con Prettier
+npm run format         # Auto-formatea todos los archivos
+npm run lint           # Ejecuta ESLint
+npm run typecheck      # Valida tipos de TypeScript sin emitir archivos
+npm run test           # Ejecuta la suite de pruebas unitarias con Vitest
+npm run test:coverage  # Ejecuta pruebas y reporte de cobertura v8
+npm run build          # Compila TypeScript a JavaScript
+```

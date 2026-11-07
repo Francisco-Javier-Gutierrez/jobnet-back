@@ -9,6 +9,7 @@ import {
 import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { evaluatePreAi } from "../../utils/preAiFilter";
+import { parseJsonBody } from "../../utils/validator";
 
 export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
   try {
@@ -23,7 +24,11 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, headers);
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
     const { userUuid } = body;
 
     if (!userUuid) {
@@ -86,14 +91,11 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
           createUserNotification({
             userId: postAuthorUuid,
             title: "Le ha gustado tu publicación ❤️",
-            message:
-              "A un usuario de JobNet le gustó tu publicación en el feed.",
+            message: "A un usuario de JobNet le gustó tu publicación en el feed.",
             type: "like",
             url: "/feed",
             extra: { postId },
-          }).catch((err) =>
-            console.error("Error creating post like notification:", err),
-          );
+          }).catch((err) => console.error("Error creating post like notification:", err));
         }
       } catch (e) {
         console.warn("Could not notify post author on like:", e);
@@ -127,14 +129,28 @@ export const addCommentPost: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, headers);
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
     const { author, content, parentId } = body;
 
-    if (!content) {
+    if (!content || typeof content !== "string" || !content.trim()) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: "Falta el contenido del comentario" }),
+      };
+    }
+
+    if (content.length > 2000) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "El comentario excede la longitud máxima permitida (2000 caracteres)",
+        }),
       };
     }
 
@@ -144,9 +160,7 @@ export const addCommentPost: APIGatewayProxyHandler = async (event) => {
         statusCode: 400,
         headers,
         body: JSON.stringify({
-          error:
-            filterResult.explanation ||
-            "El comentario contiene términos no permitidos.",
+          error: filterResult.explanation || "El comentario contiene términos no permitidos.",
           details: filterResult.matches,
         }),
       };
@@ -165,9 +179,7 @@ export const addCommentPost: APIGatewayProxyHandler = async (event) => {
     };
 
     // Clean null values
-    const cleanItem = Object.fromEntries(
-      Object.entries(commentItem).filter(([, v]) => v !== null),
-    );
+    const cleanItem = Object.fromEntries(Object.entries(commentItem).filter(([, v]) => v !== null));
 
     await docClient.send(
       new PutCommand({
@@ -195,9 +207,7 @@ export const addCommentPost: APIGatewayProxyHandler = async (event) => {
           type: "comment",
           url: "/feed",
           extra: { postId },
-        }).catch((err) =>
-          console.error("Error creating post comment notification:", err),
-        );
+        }).catch((err) => console.error("Error creating post comment notification:", err));
       }
     } catch (e) {
       console.warn("Could not notify post author on comment:", e);
@@ -288,9 +298,7 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
     // Check if there are other comments that have parentId = commentId
     const hasChildren = items.some(
       (item: any) =>
-        item.SK.startsWith("COMMENT#") &&
-        item.parentId === commentId &&
-        !item.isDeleted,
+        item.SK.startsWith("COMMENT#") && item.parentId === commentId && !item.isDeleted,
     );
 
     if (hasChildren) {
@@ -368,7 +376,11 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, headers);
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
     const { userUuid } = body;
 
     if (!userUuid) {

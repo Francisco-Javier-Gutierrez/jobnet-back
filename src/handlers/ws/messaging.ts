@@ -1,20 +1,10 @@
-import {
-  PutCommand,
-  GetCommand,
-  QueryCommand,
-  DeleteCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { PutCommand, GetCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } from "@aws-sdk/client-apigatewaymanagementapi";
 import { randomUUID } from "crypto";
-import {
-  docClient,
-  tableName,
-  getEndpoint,
-  createOfflineNotification,
-} from "./common";
+import { docClient, tableName, getEndpoint, createOfflineNotification } from "./common";
 
 export const sendMessage = async (event: any) => {
   const connectionId = event.requestContext?.connectionId;
@@ -22,10 +12,7 @@ export const sendMessage = async (event: any) => {
   console.log(`sendMessage route hit by connection: ${connectionId}`);
 
   try {
-    const body =
-      typeof event.body === "string"
-        ? JSON.parse(event.body)
-        : event.body || {};
+    const body = typeof event.body === "string" ? JSON.parse(event.body) : event.body || {};
     const {
       jobId,
       candidateId,
@@ -59,9 +46,7 @@ export const sendMessage = async (event: any) => {
         );
         if (
           incidentCheck.Item &&
-          ["RESUELTO", "RECHAZADO", "CERRADO", "APROBADO"].includes(
-            incidentCheck.Item.estado,
-          )
+          ["RESUELTO", "RECHAZADO", "CERRADO", "APROBADO"].includes(incidentCheck.Item.estado)
         ) {
           isAppealClosed = true;
         } else {
@@ -73,9 +58,7 @@ export const sendMessage = async (event: any) => {
           );
           if (
             verifyCheck.Item &&
-            ["APROBADO", "RECHAZADO", "RESUELTO", "CERRADO"].includes(
-              verifyCheck.Item.estado,
-            )
+            ["APROBADO", "RECHAZADO", "RESUELTO", "CERRADO"].includes(verifyCheck.Item.estado)
           ) {
             isAppealClosed = true;
           }
@@ -148,10 +131,7 @@ export const sendMessage = async (event: any) => {
         }),
       );
 
-      const targetKeys: string[] = [
-        `USER#${appealCompanyId}`,
-        "ROLE#MODERATOR",
-      ];
+      const targetKeys: string[] = [`USER#${appealCompanyId}`, "ROLE#MODERATOR"];
 
       try {
         const companyProfile = await docClient.send(
@@ -160,13 +140,8 @@ export const sendMessage = async (event: any) => {
             Key: { PK: `USER#${appealCompanyId}`, SK: "PROFILE" },
           }),
         );
-        const ownerSub =
-          companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
-        if (
-          ownerSub &&
-          ownerSub !== appealCompanyId &&
-          !targetKeys.includes(`USER#${ownerSub}`)
-        ) {
+        const ownerSub = companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
+        if (ownerSub && ownerSub !== appealCompanyId && !targetKeys.includes(`USER#${ownerSub}`)) {
           targetKeys.push(`USER#${ownerSub}`);
         }
       } catch {
@@ -209,10 +184,7 @@ export const sendMessage = async (event: any) => {
                       attachmentUrl: attachmentUrl || null,
                       attachmentType:
                         attachmentType ||
-                        (attachmentUrl &&
-                        /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(
-                          attachmentUrl,
-                        )
+                        (attachmentUrl && /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(attachmentUrl)
                           ? "image"
                           : "file"),
                       attachmentName: attachmentName || "attachment",
@@ -287,10 +259,7 @@ export const sendMessage = async (event: any) => {
           Key: { PK: `JOB#${jobId}`, SK: `APP#${candidateId}` },
         }),
       );
-      if (
-        appCheck.Item &&
-        ["RECHAZADO", "CONTRATADO", "CERRADO"].includes(appCheck.Item.status)
-      ) {
+      if (appCheck.Item && ["RECHAZADO", "CONTRATADO", "CERRADO"].includes(appCheck.Item.status)) {
         return {
           statusCode: 403,
           body: "Forbidden: La postulación ha sido cerrada y el chat es de solo lectura.",
@@ -404,9 +373,7 @@ export const sendMessage = async (event: any) => {
       } catch (err: any) {
         // If connection is stale/gone, delete it from DynamoDB
         if (err.statusCode === 410) {
-          console.log(
-            `Stale connection detected: ${targetConnectionId}, cleaning up.`,
-          );
+          console.log(`Stale connection detected: ${targetConnectionId}, cleaning up.`);
           await docClient.send(
             new DeleteCommand({
               TableName: tableName,
@@ -437,10 +404,7 @@ export const sendMessage = async (event: any) => {
       await createOfflineNotification({
         userId: recipientId,
         title: "Nuevo mensaje de chat",
-        message:
-          text ||
-          attachmentName ||
-          "Tienes un nuevo mensaje en tu conversación.",
+        message: text || attachmentName || "Tienes un nuevo mensaje en tu conversación.",
         url: `/messages?jobId=${jobId}&candidateId=${candidateId}`,
       });
     }

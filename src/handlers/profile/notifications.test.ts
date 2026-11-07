@@ -28,6 +28,9 @@ import {
   getNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  sendCustomPushNotification,
+  getPushSubscribers,
+  notifyCvInteraction,
 } from "./notifications";
 
 describe("profile notifications handlers", () => {
@@ -39,11 +42,7 @@ describe("profile notifications handlers", () => {
 
   describe("getNotifications", () => {
     it("should return 400 if id is missing", async () => {
-      const res = await getNotifications(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await getNotifications({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -84,11 +83,7 @@ describe("profile notifications handlers", () => {
 
   describe("markNotificationRead", () => {
     it("should return 400 if userId or notifId is missing", async () => {
-      const res = await markNotificationRead(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await markNotificationRead({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 
@@ -159,9 +154,7 @@ describe("profile notifications handlers", () => {
         () => {},
       );
       expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body).message).toContain(
-        "1 notifications marked as read",
-      );
+      expect(JSON.parse(res.body).message).toContain("1 notifications marked as read");
     });
 
     it("should return 500 on database error", async () => {
@@ -172,6 +165,54 @@ describe("profile notifications handlers", () => {
         () => {},
       );
       expect(res.statusCode).toBe(500);
+    });
+  });
+
+  describe("security and validation for push endpoints", () => {
+    it("getPushSubscribers should return 403 for non-admins", async () => {
+      const res = await getPushSubscribers(
+        { headers: { "x-user-role": "CANDIDATO" } } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("sendCustomPushNotification should return 403 for non-admins", async () => {
+      const res = await sendCustomPushNotification(
+        {
+          headers: { "x-user-role": "CANDIDATO" },
+          body: JSON.stringify({ title: "Hi", message: "World" }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("sendCustomPushNotification should validate body schema with Zod", async () => {
+      const res = await sendCustomPushNotification(
+        {
+          headers: { "x-user-role": "ADMIN" },
+          body: JSON.stringify({ title: "", message: "" }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("notifyCvInteraction should return 401 if unauthenticated", async () => {
+      const res = await notifyCvInteraction(
+        {
+          pathParameters: { id: "c-1" },
+          headers: {},
+          body: JSON.stringify({ action: "VIEW" }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(401);
     });
   });
 });

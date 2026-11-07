@@ -1,9 +1,5 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const {
-  DynamoDBDocumentClient,
-  PutCommand,
-  ScanCommand,
-} = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, PutCommand, ScanCommand } = require("@aws-sdk/lib-dynamodb");
 const crypto = require("crypto");
 
 const client = new DynamoDBClient({ region: "us-east-1" });
@@ -14,8 +10,7 @@ const TableName = "jobnet-jobs-prod";
 const jobTemplates = [
   {
     titulo: "Desarrollador Full Stack Jr",
-    descripcion:
-      "Buscamos un desarrollador entusiasta para unirse a nuestro equipo de producto.",
+    descripcion: "Buscamos un desarrollador entusiasta para unirse a nuestro equipo de producto.",
     modalidad: "Remoto",
     salarioMinimo: 15000,
     salarioMaximo: 25000,
@@ -66,9 +61,7 @@ async function seedVacancies() {
       const companyName = company.nombreComercial || "Empresa";
 
       // Select 2 random job templates
-      const selectedJobs = jobTemplates
-        .sort(() => 0.5 - Math.random())
-        .slice(0, 2);
+      const selectedJobs = jobTemplates.sort(() => 0.5 - Math.random()).slice(0, 2);
 
       for (const job of selectedJobs) {
         const vacancyUuid = crypto.randomUUID();

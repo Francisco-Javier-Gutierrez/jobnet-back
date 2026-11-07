@@ -1,15 +1,12 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  ScanCommand,
-  PutCommand,
-  GetCommand,
-  UpdateCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { ScanCommand, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { docClient, tableName, headers } from "./common";
 import { evaluatePreAi } from "../../utils/preAiFilter";
 import { moderateTextWithAi } from "../../utils/geminiModeration";
 import { moderateS3Media } from "../../utils/s3ModerationHelper";
+import { parseJsonBody } from "../../utils/validator";
+import { extractAuthContext } from "../../utils/authHelper";
 
 export const getPosts: APIGatewayProxyHandler = async (event) => {
   try {
@@ -110,8 +107,7 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
       profileResults.forEach((res) => {
         if (res.Item && res.Item.PK) {
           const uid = res.Item.PK.replace("USER#", "");
-          profileMap[uid] =
-            res.Item.fotoPerfil || res.Item.avatarUrl || res.Item.avatar || "";
+          profileMap[uid] = res.Item.fotoPerfil || res.Item.avatarUrl || res.Item.avatar || "";
         }
       });
 
@@ -125,28 +121,22 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
 
     // Convert map to array and sort by createdAt descending
     let posts = Object.values(postsMap).sort(
-      (a: any, b: any) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
     if (authorUuidParam) {
       posts = posts.filter(
         (p: any) =>
           p.authorUuid === authorUuidParam ||
-          (authorNameParam &&
-            p.author.toLowerCase() === authorNameParam.toLowerCase()),
+          (authorNameParam && p.author.toLowerCase() === authorNameParam.toLowerCase()),
       );
     } else if (authorNameParam) {
-      posts = posts.filter(
-        (p: any) => p.author.toLowerCase() === authorNameParam.toLowerCase(),
-      );
+      posts = posts.filter((p: any) => p.author.toLowerCase() === authorNameParam.toLowerCase());
     }
 
     if (bookmarkedByParam) {
       posts = posts.filter(
-        (p: any) =>
-          Array.isArray(p.bookmarksList) &&
-          p.bookmarksList.includes(bookmarkedByParam),
+        (p: any) => Array.isArray(p.bookmarksList) && p.bookmarksList.includes(bookmarkedByParam),
       );
     }
 
@@ -166,18 +156,15 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
 
 export const createPost: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
-    const {
-      author,
-      role,
-      authorUuid,
-      authorAvatar,
-      fotoPerfil,
-      content,
-      media,
-      pdfUrl,
-      pdfName,
-    } = body;
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
+    const auth = await extractAuthContext(event);
+
+    const { author, role, authorUuid, authorAvatar, fotoPerfil, content, media, pdfUrl, pdfName } =
+      body;
 
     if (!content && !media && !pdfUrl) {
       return {
@@ -185,6 +172,16 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
         headers,
         body: JSON.stringify({
           error: "Debe ingresar contenido, imagen o documento PDF.",
+        }),
+      };
+    }
+
+    if (content && typeof content === "string" && content.length > 5000) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "El contenido de la publicación excede el límite máximo de 5000 caracteres.",
         }),
       };
     }
@@ -210,9 +207,7 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
           statusCode: 400,
           headers,
           body: JSON.stringify({
-            error:
-              aiModeration.reason ||
-              "La publicación infringe las políticas comunitarias.",
+            error: aiModeration.reason || "La publicación infringe las políticas comunitarias.",
             flaggedCategories: aiModeration.flaggedCategories,
           }),
         };
@@ -227,8 +222,7 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
           headers,
           body: JSON.stringify({
             error:
-              mediaMod.reason ||
-              "La imagen adjunta infringe las políticas de contenido de JobNet.",
+              mediaMod.reason || "La imagen adjunta infringe las políticas de contenido de JobNet.",
             flaggedCategories: mediaMod.flaggedCategories,
           }),
         };
@@ -259,7 +253,7 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
       SK: "METADATA",
       author: author || "Usuario JobNet",
       role: role || "Candidato",
-      authorUuid: authorUuid || "anonymous",
+      authorUuid: auth.userId || authorUuid || "anonymous",
       authorAvatar: authorAvatar || fotoPerfil || null,
       fotoPerfil: fotoPerfil || authorAvatar || null,
       content: content || "",
@@ -273,9 +267,7 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
     };
 
     // Remove null values to comply with NoSQL DynamoDB rules
-    const cleanItem = Object.fromEntries(
-      Object.entries(postItem).filter(([, v]) => v !== null),
-    );
+    const cleanItem = Object.fromEntries(Object.entries(postItem).filter(([, v]) => v !== null));
 
     await docClient.send(
       new PutCommand({

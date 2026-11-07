@@ -203,8 +203,7 @@ export const getViewPresignedUrl: APIGatewayProxyHandler = async (event) => {
         statusCode: 401,
         headers,
         body: JSON.stringify({
-          error:
-            "No autenticado. Token requerido para ver o descargar archivos.",
+          error: "No autenticado. Token requerido para ver o descargar archivos.",
         }),
       };
     }

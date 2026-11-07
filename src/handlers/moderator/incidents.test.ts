@@ -129,9 +129,7 @@ describe("moderator incidents handlers", () => {
       const event = { body: JSON.stringify({}) } as any;
       const response = await createIncident(event, {} as any, () => {});
       expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.body).error).toBe(
-        "Missing body parameter 'reason'",
-      );
+      expect(JSON.parse(response.body).error).toBe("Missing body parameter 'reason'");
     });
 
     it("should create incident successfully without triggering auto-evaluation if < 5 reports", async () => {
@@ -249,11 +247,7 @@ describe("moderator incidents handlers", () => {
       }); // Vacancy get
       mockDynamoSend.mockResolvedValueOnce({}); // PutCommand synthetic incident
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // getOrgAppealMessageCount
       mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand incident
       mockDynamoSend.mockResolvedValueOnce({}); // DeleteCommand grace period
@@ -332,11 +326,7 @@ describe("moderator incidents handlers", () => {
           input.ExpressionAttributeValues?.[":pk"]?.startsWith("APPEAL_CHAT")
         )
           return {
-            Items: [
-              { senderId: "comp-1" },
-              { senderId: "comp-1" },
-              { senderId: "comp-1" },
-            ],
+            Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
           };
         return {};
       });
@@ -426,11 +416,7 @@ describe("moderator incidents handlers", () => {
           input.ExpressionAttributeValues?.[":pk"]?.startsWith("APPEAL_CHAT")
         )
           return {
-            Items: [
-              { senderId: "comp-1" },
-              { senderId: "comp-1" },
-              { senderId: "comp-1" },
-            ],
+            Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
           };
         return {};
       });
@@ -509,11 +495,7 @@ describe("moderator incidents handlers", () => {
         Item: { PK: "INCIDENT#inc-1", jobId: "job-1", companyId: "comp-1" },
       }); // Get incident
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // Appeal msg count (3 messages)
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident
       mockDynamoSend.mockResolvedValueOnce({}); // Delete grace period
@@ -578,11 +560,7 @@ describe("moderator incidents handlers", () => {
         Item: { PK: "INCIDENT#inc-b", jobId: "job-1", companyId: "comp-1" },
       }); // Get incident
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // 3 appeal messages
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident
       mockDynamoSend.mockResolvedValueOnce({}); // Delete grace period
@@ -614,19 +592,13 @@ describe("moderator incidents handlers", () => {
         Item: { PK: "INCIDENT#inc-b2", jobId: "job-1", companyId: "comp-1" },
       }); // Get incident
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // 3 appeal messages
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident
       mockDynamoSend.mockResolvedValueOnce({}); // Delete grace period
       mockDynamoSend.mockResolvedValueOnce({}); // Update vacancy
       mockDynamoSend.mockResolvedValueOnce({}); // Put notification
-      mockDynamoSend.mockRejectedValueOnce(
-        new Error("Vacancy get failure for domain block"),
-      ); // Line 508
+      mockDynamoSend.mockRejectedValueOnce(new Error("Vacancy get failure for domain block")); // Line 508
       mockDynamoSend.mockResolvedValueOnce({}); // Update profile chat
 
       const resBlock2 = await resolveIncident(
@@ -644,19 +616,13 @@ describe("moderator incidents handlers", () => {
         Item: { PK: "INCIDENT#inc-a", jobId: "job-1", companyId: "comp-1" },
       }); // Get incident
       mockDynamoSend.mockResolvedValueOnce({
-        Items: [
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-          { senderId: "comp-1" },
-        ],
+        Items: [{ senderId: "comp-1" }, { senderId: "comp-1" }, { senderId: "comp-1" }],
       }); // 3 appeal messages
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident
       mockDynamoSend.mockResolvedValueOnce({}); // Delete grace period
       mockDynamoSend.mockResolvedValueOnce({}); // Update vacancy
       mockDynamoSend.mockResolvedValueOnce({}); // Put notification
-      mockDynamoSend.mockRejectedValueOnce(
-        new Error("Profile lookup failure for approve"),
-      ); // Line 727
+      mockDynamoSend.mockRejectedValueOnce(new Error("Profile lookup failure for approve")); // Line 727
       mockDynamoSend.mockResolvedValueOnce({}); // Update profile chat
       mockDynamoSend.mockResolvedValueOnce({ Item: null }); // Broadcast profile
       mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Broadcast q1

@@ -8,6 +8,8 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { docClient, tableName, headers } from "./profile/common";
+import { extractAuthContext } from "../utils/authHelper";
+import { parseJsonBody } from "../utils/validator";
 
 export interface CommunityCvTemplateItem {
   PK: string;
@@ -95,9 +97,7 @@ export const getCvTemplates: APIGatewayProxyHandler = async (event) => {
     }
 
     if (categoria) {
-      items = items.filter(
-        (t) => (t.categoria || "").toLowerCase() === categoria.toLowerCase(),
-      );
+      items = items.filter((t) => (t.categoria || "").toLowerCase() === categoria.toLowerCase());
     }
 
     // Sort by usesCount descending, then by createdAt descending
@@ -125,20 +125,28 @@ export const getCvTemplates: APIGatewayProxyHandler = async (event) => {
 
 export const createCvTemplate: APIGatewayProxyHandler = async (event) => {
   try {
+    const auth = await extractAuthContext(event);
     const userId =
-      event.headers["x-user-id"] ||
-      event.headers["X-User-Id"] ||
+      auth.userId ||
+      event.headers?.["x-user-id"] ||
+      event.headers?.["X-User-Id"] ||
       event.requestContext?.authorizer?.claims?.sub;
 
     if (!userId) {
       return {
         statusCode: 401,
         headers,
-        body: JSON.stringify({ error: "No autorizado. Se requiere x-user-id." }),
+        body: JSON.stringify({
+          error: "No autorizado. Se requiere x-user-id.",
+        }),
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const {
       titulo,
       rol,
@@ -185,12 +193,8 @@ export const createCvTemplate: APIGatewayProxyHandler = async (event) => {
       isOfficial: false,
       habilidades: Array.isArray(habilidades) ? habilidades : [],
       biografiaSugerida: biografiaSugerida || "",
-      experienciaSugerida: Array.isArray(experienciaSugerida)
-        ? experienciaSugerida
-        : [],
-      educacionSugerida: Array.isArray(educacionSugerida)
-        ? educacionSugerida
-        : [],
+      experienciaSugerida: Array.isArray(experienciaSugerida) ? experienciaSugerida : [],
+      educacionSugerida: Array.isArray(educacionSugerida) ? educacionSugerida : [],
       translations: body.translations || undefined,
       stats: {
         usesCount: 0,
@@ -323,8 +327,7 @@ export const useCvTemplate: APIGatewayProxyHandler = async (event) => {
           PK: `CV_TEMPLATE#${id}`,
           SK: `METADATA#${id}`,
         },
-        UpdateExpression:
-          "SET #stats.#usesCount = if_not_exists(#stats.#usesCount, :zero) + :one",
+        UpdateExpression: "SET #stats.#usesCount = if_not_exists(#stats.#usesCount, :zero) + :one",
         ExpressionAttributeNames: {
           "#stats": "stats",
           "#usesCount": "usesCount",

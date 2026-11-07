@@ -35,14 +35,12 @@ describe("S3 Media Moderation Helper", () => {
       ContentType: "image/png",
     });
 
-    const spyImage = vi
-      .spyOn(geminiModeration, "moderateImageWithAi")
-      .mockResolvedValueOnce({
-        safe: false,
-        confidence: 0.99,
-        flaggedCategories: ["NSFW"],
-        reason: "Imagen inapropiada",
-      });
+    const spyImage = vi.spyOn(geminiModeration, "moderateImageWithAi").mockResolvedValueOnce({
+      safe: false,
+      confidence: 0.99,
+      flaggedCategories: ["NSFW"],
+      reason: "Imagen inapropiada",
+    });
 
     const res = await moderateS3Media(
       "https://test-bucket.s3.amazonaws.com/uploads/posts/user-1/foto.png",
@@ -63,14 +61,12 @@ describe("S3 Media Moderation Helper", () => {
       ContentType: "application/pdf",
     });
 
-    const spyDoc = vi
-      .spyOn(geminiModeration, "moderateDocumentWithAi")
-      .mockResolvedValueOnce({
-        safe: true,
-        confidence: 0.95,
-        flaggedCategories: [],
-        reason: null,
-      });
+    const spyDoc = vi.spyOn(geminiModeration, "moderateDocumentWithAi").mockResolvedValueOnce({
+      safe: true,
+      confidence: 0.95,
+      flaggedCategories: [],
+      reason: null,
+    });
 
     const res = await moderateS3Media("uploads/cvs/user-1/cv.pdf", "PDF");
     expect(spyDoc).toHaveBeenCalled();

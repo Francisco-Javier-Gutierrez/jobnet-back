@@ -28,20 +28,26 @@ export interface AuthContext {
   userId: string;
   email?: string;
   role: string;
+  isAdmin: boolean;
   isModerator: boolean;
   isAuthenticated: boolean;
 }
 
 export const extractAuthContext = async (event: any): Promise<AuthContext> => {
   if (!event) {
-    return { userId: "", role: "", isModerator: false, isAuthenticated: false };
+    return {
+      userId: "",
+      role: "",
+      isAdmin: false,
+      isModerator: false,
+      isAuthenticated: false,
+    };
   }
 
   // 1. Check API Gateway HTTP API (JWT authorizer) or REST / Lambda authorizer
   const authorizer = event.requestContext?.authorizer;
   const jwtClaims = authorizer?.jwt?.claims || authorizer?.claims;
-  const principalId =
-    authorizer?.principalId || authorizer?.lambda?.principalId;
+  const principalId = authorizer?.principalId || authorizer?.lambda?.principalId;
 
   if (jwtClaims || principalId) {
     const sub = jwtClaims?.sub || principalId || "";
@@ -55,13 +61,14 @@ export const extractAuthContext = async (event: any): Promise<AuthContext> => {
       .toString()
       .toUpperCase();
 
-    const isMod =
-      rawRole === "ADMIN" || rawRole === "MODERATOR" || rawRole === "MODERADOR";
+    const isAdmin = rawRole === "ADMIN";
+    const isMod = isAdmin || rawRole === "MODERATOR" || rawRole === "MODERADOR";
 
     return {
       userId: sub,
       email,
       role: rawRole,
+      isAdmin,
       isModerator: isMod,
       isAuthenticated: !!sub,
     };
@@ -70,11 +77,7 @@ export const extractAuthContext = async (event: any): Promise<AuthContext> => {
   // 2. Extract Bearer Token from Authorization Header
   const headers = event.headers || {};
   const authHeader = headers.Authorization || headers.authorization;
-  if (
-    authHeader &&
-    typeof authHeader === "string" &&
-    authHeader.startsWith("Bearer ")
-  ) {
+  if (authHeader && typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
     const token = authHeader.replace(/^Bearer\s+/i, "");
     const verifier = getVerifier();
 
@@ -83,11 +86,7 @@ export const extractAuthContext = async (event: any): Promise<AuthContext> => {
         const payload = await verifier.verify(token);
         const sub = payload.sub;
         const email = (payload.email as string) || "";
-        const rawRole = (
-          payload["custom:role"] ||
-          payload["custom:tipoUsuario"] ||
-          ""
-        )
+        const rawRole = (payload["custom:role"] || payload["custom:tipoUsuario"] || "")
           .toString()
           .toUpperCase();
 
@@ -100,23 +99,21 @@ export const extractAuthContext = async (event: any): Promise<AuthContext> => {
                 ? payload.scp
                 : [];
 
-        const hasModScope = scopes.some(
-          (s: string) =>
-            s.toLowerCase().includes("moderator") ||
-            s.toLowerCase().includes("mod") ||
-            s.toLowerCase().includes("admin"),
-        );
+        const hasAdminScope = scopes.some((s: string) => s.toLowerCase().includes("admin"));
+        const hasModScope =
+          hasAdminScope ||
+          scopes.some(
+            (s: string) => s.toLowerCase().includes("moderator") || s.toLowerCase().includes("mod"),
+          );
 
-        const isMod =
-          rawRole === "ADMIN" ||
-          rawRole === "MODERATOR" ||
-          rawRole === "MODERADOR" ||
-          hasModScope;
+        const isAdmin = rawRole === "ADMIN" || hasAdminScope;
+        const isMod = isAdmin || rawRole === "MODERATOR" || rawRole === "MODERADOR" || hasModScope;
 
         return {
           userId: sub,
           email,
-          role: rawRole || (isMod ? "MODERATOR" : "USER"),
+          role: rawRole || (isAdmin ? "ADMIN" : isMod ? "MODERATOR" : "USER"),
+          isAdmin,
           isModerator: isMod,
           isAuthenticated: true,
         };
@@ -135,27 +132,19 @@ export const extractAuthContext = async (event: any): Promise<AuthContext> => {
 
   if (isLocalOrTest) {
     const headerUserId =
-      headers["x-user-id"] ||
-      headers["X-User-Id"] ||
-      headers["x-userid"] ||
-      headers["X-UserId"];
-    const headerUserRole = (
-      headers["x-user-role"] ||
-      headers["X-User-Role"] ||
-      ""
-    )
+      headers["x-user-id"] || headers["X-User-Id"] || headers["x-userid"] || headers["X-UserId"];
+    const headerUserRole = (headers["x-user-role"] || headers["X-User-Role"] || "")
       .toString()
       .toUpperCase();
 
     if (headerUserId || headerUserRole) {
-      const isMod =
-        headerUserRole === "ADMIN" ||
-        headerUserRole === "MODERATOR" ||
-        headerUserRole === "MODERADOR";
+      const isAdmin = headerUserRole === "ADMIN";
+      const isMod = isAdmin || headerUserRole === "MODERATOR" || headerUserRole === "MODERADOR";
       return {
         userId: headerUserId || "test-user",
         email: "test@example.com",
-        role: headerUserRole || (isMod ? "MODERATOR" : "USER"),
+        role: headerUserRole || (isAdmin ? "ADMIN" : isMod ? "MODERATOR" : "USER"),
+        isAdmin,
         isModerator: isMod,
         isAuthenticated: true,
       };
@@ -165,6 +154,7 @@ export const extractAuthContext = async (event: any): Promise<AuthContext> => {
   return {
     userId: "",
     role: "",
+    isAdmin: false,
     isModerator: false,
     isAuthenticated: false,
   };

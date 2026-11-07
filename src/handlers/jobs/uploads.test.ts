@@ -43,11 +43,7 @@ vi.mock("@aws-sdk/client-ses", () => ({
   },
 }));
 
-import {
-  getUploadPresignedUrl,
-  getViewPresignedUrl,
-  sendNotificationEmail,
-} from "./uploads";
+import { getUploadPresignedUrl, getViewPresignedUrl, sendNotificationEmail } from "./uploads";
 
 describe("jobs uploads & emails handlers", () => {
   beforeEach(() => {
@@ -55,9 +51,7 @@ describe("jobs uploads & emails handlers", () => {
     mockS3Send.mockReset();
     mockSESSend.mockReset();
     mockGetSignedUrl.mockReset();
-    mockGetSignedUrl.mockResolvedValue(
-      "https://s3.amazonaws.com/presigned-url",
-    );
+    mockGetSignedUrl.mockResolvedValue("https://s3.amazonaws.com/presigned-url");
     mockSESSend.mockResolvedValue({});
   });
 
@@ -69,9 +63,7 @@ describe("jobs uploads & emails handlers", () => {
 
       const res = await getUploadPresignedUrl(event, {} as any, () => {});
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).error).toContain(
-        "Extensión de archivo peligrosa",
-      );
+      expect(JSON.parse(res.body).error).toContain("Extensión de archivo peligrosa");
     });
 
     it("should return 400 if filename has double extension suspicious pattern (e.g. cv.pdf.xyz)", async () => {
@@ -81,9 +73,7 @@ describe("jobs uploads & emails handlers", () => {
 
       const res = await getUploadPresignedUrl(event, {} as any, () => {});
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).error).toContain(
-        "Validación de doble extensión fallida",
-      );
+      expect(JSON.parse(res.body).error).toContain("Validación de doble extensión fallida");
     });
 
     it("should return 400 if size is missing or invalid", async () => {
@@ -187,7 +177,9 @@ describe("jobs uploads & emails handlers", () => {
     });
 
     it("should return 403 if key does not start with uploads/", async () => {
-      const event = { queryStringParameters: { key: "secrets/config.json" } } as any;
+      const event = {
+        queryStringParameters: { key: "secrets/config.json" },
+      } as any;
       const res = await getViewPresignedUrl(event, {} as any, () => {});
       expect(res.statusCode).toBe(403);
       expect(JSON.parse(res.body).error).toContain("Acceso no autorizado");
@@ -228,4 +220,3 @@ describe("jobs uploads & emails handlers", () => {
     });
   });
 });
-

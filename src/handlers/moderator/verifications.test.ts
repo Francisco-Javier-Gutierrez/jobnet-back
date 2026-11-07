@@ -71,11 +71,7 @@ describe("moderator verifications handlers", () => {
         ],
       });
 
-      const response = await getVerificationRequests(
-        {} as any,
-        {} as any,
-        () => {},
-      );
+      const response = await getVerificationRequests({} as any, {} as any, () => {});
       expect(response.statusCode).toBe(200);
 
       const res = JSON.parse(response.body);
@@ -93,11 +89,7 @@ describe("moderator verifications handlers", () => {
 
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("DB error"));
-      const response = await getVerificationRequests(
-        {} as any,
-        {} as any,
-        () => {},
-      );
+      const response = await getVerificationRequests({} as any, {} as any, () => {});
       expect(response.statusCode).toBe(500);
       expect(JSON.parse(response.body).error).toBe("DB error");
     });
@@ -152,9 +144,7 @@ describe("moderator verifications handlers", () => {
 
       const response = await resolveVerification(event, {} as any, () => {});
       expect(response.statusCode).toBe(400);
-      expect(JSON.parse(response.body).error).toContain(
-        "Solo se puede verificar",
-      );
+      expect(JSON.parse(response.body).error).toContain("Solo se puede verificar");
     });
 
     it("should approve verification successfully", async () => {

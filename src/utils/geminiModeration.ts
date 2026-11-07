@@ -81,13 +81,23 @@ Responde ÚNICAMENTE con un objeto JSON con este esquema exacto:
 
     if (!response.ok) {
       console.error(`Gemini API error [${response.status}]:`, await response.text());
-      return { safe: true, confidence: 0.5, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 0.5,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const data = (await response.json()) as any;
     const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawContent) {
-      return { safe: true, confidence: 0.5, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 0.5,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const parsed = JSON.parse(rawContent) as ModerationAiResult;
@@ -165,13 +175,23 @@ Responde ÚNICAMENTE con este JSON:
 
     if (!response.ok) {
       console.error(`Gemini API error [${response.status}]:`, await response.text());
-      return { safe: true, confidence: 0.5, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 0.5,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const data = (await response.json()) as any;
     const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawContent) {
-      return { safe: true, confidence: 0.5, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 0.5,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const parsed = JSON.parse(rawContent) as ModerationAiResult;
@@ -257,13 +277,23 @@ Responde ÚNICAMENTE con este JSON:
 
     if (!response.ok) {
       console.error(`Gemini API error [${response.status}]:`, await response.text());
-      return { safe: true, confidence: 0.5, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 0.5,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const data = (await response.json()) as any;
     const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!rawContent) {
-      return { safe: true, confidence: 0.5, flaggedCategories: [], reason: null };
+      return {
+        safe: true,
+        confidence: 0.5,
+        flaggedCategories: [],
+        reason: null,
+      };
     }
 
     const parsed = JSON.parse(rawContent) as ModerationAiResult;

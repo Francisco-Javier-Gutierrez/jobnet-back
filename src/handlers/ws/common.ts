@@ -75,16 +75,10 @@ export const createOfflineNotification = async ({
         url: url || "/notifications",
       });
     } catch (pushErr) {
-      console.error(
-        `Error sending push notification to user ${userId}:`,
-        pushErr,
-      );
+      console.error(`Error sending push notification to user ${userId}:`, pushErr);
     }
   } catch (err) {
-    console.error(
-      `Error creating offline notification for user ${userId}:`,
-      err,
-    );
+    console.error(`Error creating offline notification for user ${userId}:`, err);
   }
 };
 

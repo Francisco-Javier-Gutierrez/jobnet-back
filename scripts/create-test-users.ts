@@ -82,9 +82,7 @@ async function run() {
             Username: u.email,
           }),
         );
-        sub =
-          existingUser.UserAttributes?.find((a) => a.Name === "sub")?.Value ||
-          "";
+        sub = existingUser.UserAttributes?.find((a) => a.Name === "sub")?.Value || "";
         console.log(" - Sub recuperado:", sub);
       } else {
         console.error(" - Error Cognito:", e);
@@ -118,9 +116,7 @@ async function run() {
         estadoCuenta: "ACTIVA",
         bloqueada: false,
         fotoPerfil:
-          "https://ui-avatars.com/api/?name=" +
-          encodeURIComponent(u.nombre) +
-          "&background=random",
+          "https://ui-avatars.com/api/?name=" + encodeURIComponent(u.nombre) + "&background=random",
         fechaCreacion: new Date().toISOString(),
       };
 

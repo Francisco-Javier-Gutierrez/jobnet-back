@@ -48,11 +48,7 @@ describe("moderator appeals handlers", () => {
 
   describe("joinAppeal", () => {
     it("should return 400 if companyId is missing", async () => {
-      const res = await joinAppeal(
-        { pathParameters: {} } as any,
-        {} as any,
-        () => {},
-      );
+      const res = await joinAppeal({ pathParameters: {} } as any, {} as any, () => {});
       expect(res.statusCode).toBe(400);
     });
 

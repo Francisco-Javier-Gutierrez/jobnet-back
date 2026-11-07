@@ -34,12 +34,7 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
-import {
-  getCatalog,
-  createCatalogItem,
-  updateCatalogItem,
-  deleteCatalogItem,
-} from "./catalog";
+import { getCatalog, createCatalogItem, updateCatalogItem, deleteCatalogItem } from "./catalog";
 
 describe("catalog handler", () => {
   beforeEach(() => {

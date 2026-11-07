@@ -1,16 +1,11 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  UpdateCommand,
-  QueryCommand,
-  ScanCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { UpdateCommand, QueryCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { docClient, tableName, headers } from "./common";
 
 // Empresa se une al chat de apelación
 export const joinAppeal: APIGatewayProxyHandler = async (event) => {
   try {
-    const companyId =
-      event.pathParameters?.id || event.pathParameters?.companyId;
+    const companyId = event.pathParameters?.id || event.pathParameters?.companyId;
     if (!companyId) {
       return {
         statusCode: 400,
@@ -59,8 +54,7 @@ export const getAppeals: APIGatewayProxyHandler = async () => {
         TableName: tableName,
         IndexName: "GSI1",
         KeyConditionExpression: "GSI1PK = :gsiPk",
-        FilterExpression:
-          "estatus = :st OR estadoCuenta = :ec OR suspensionStatus = :ss",
+        FilterExpression: "estatus = :st OR estadoCuenta = :ec OR suspensionStatus = :ss",
         ExpressionAttributeValues: {
           ":gsiPk": "PROFILE",
           ":st": "En revisión",
@@ -89,18 +83,11 @@ export const getAppeals: APIGatewayProxyHandler = async () => {
         id: org.PK.replace("USER#", ""),
         type: "ORGANIZACION",
         companyId: org.PK.replace("USER#", ""),
-        name:
-          org.nombreComercial ||
-          org.nombre ||
-          org.razonSocial ||
-          "Organización en Apelación",
-        reason:
-          org.suspensionReason ||
-          "Proceso de revisión de cuenta e infracción de normas",
+        name: org.nombreComercial || org.nombre || org.razonSocial || "Organización en Apelación",
+        reason: org.suspensionReason || "Proceso de revisión de cuenta e infracción de normas",
         status: org.estatus || "En revisión",
         gracePeriodEnd: org.suspensionGracePeriodEnd || null,
-        createdAt:
-          org.updatedAt || org.fechaCreacion || new Date().toISOString(),
+        createdAt: org.updatedAt || org.fechaCreacion || new Date().toISOString(),
       })),
       ...(vacanciesResult.Items || []).map((vac: any) => ({
         id: vac.PK.replace("VACANCY#", ""),
@@ -113,10 +100,7 @@ export const getAppeals: APIGatewayProxyHandler = async () => {
           "Vacante pausada para evaluación por acumulación de reportes",
         status: vac.estado || "EVALUACION",
         gracePeriodEnd: vac.fechaLimiteApelacion || null,
-        createdAt:
-          vac.fechaActualizacion ||
-          vac.fechaCreacion ||
-          new Date().toISOString(),
+        createdAt: vac.fechaActualizacion || vac.fechaCreacion || new Date().toISOString(),
       })),
     ];
 

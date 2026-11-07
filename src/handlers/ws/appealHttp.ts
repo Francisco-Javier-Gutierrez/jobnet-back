@@ -1,10 +1,5 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  PutCommand,
-  GetCommand,
-  QueryCommand,
-  DeleteCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { PutCommand, GetCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
@@ -58,11 +53,7 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
     );
 
     const messages = (result.Items || [])
-      .filter(
-        (m) =>
-          !m.isJoinMessage &&
-          (!m.text || !m.text.includes("La empresa se ha unido")),
-      )
+      .filter((m) => !m.isJoinMessage && (!m.text || !m.text.includes("La empresa se ha unido")))
       .map((m) => ({
         appealId: m.appealId || appealId,
         companyId: m.companyId,
@@ -88,9 +79,7 @@ export const getAppealMessages: APIGatewayProxyHandler = async (event: any) => {
   }
 };
 
-export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
-  event: any,
-) => {
+export const sendAppealMessageHttp: APIGatewayProxyHandler = async (event: any) => {
   const appealId = event.pathParameters?.id || event.pathParameters?.appealId;
   if (!appealId) {
     return {
@@ -104,10 +93,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
     const auth = await extractAuthContext(event);
     const isTestMode = process.env.NODE_ENV === "test";
 
-    const body =
-      typeof event.body === "string"
-        ? JSON.parse(event.body)
-        : event.body || {};
+    const body = typeof event.body === "string" ? JSON.parse(event.body) : event.body || {};
     const { text, attachmentUrl, companyId } = body;
 
     if (!auth.isAuthenticated && !isTestMode && !body.senderId) {
@@ -141,8 +127,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
         statusCode: 403,
         headers: corsHeaders,
         body: JSON.stringify({
-          error:
-            "Forbidden: No autorizado para enviar mensajes en este canal de apelación",
+          error: "Forbidden: No autorizado para enviar mensajes en este canal de apelación",
         }),
       };
     }
@@ -159,9 +144,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
         );
         if (
           incidentCheck.Item &&
-          ["RESUELTO", "RECHAZADO", "CERRADO", "APROBADO"].includes(
-            incidentCheck.Item.estado,
-          )
+          ["RESUELTO", "RECHAZADO", "CERRADO", "APROBADO"].includes(incidentCheck.Item.estado)
         ) {
           isAppealClosed = true;
         } else {
@@ -173,9 +156,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
           );
           if (
             verifyCheck.Item &&
-            ["APROBADO", "RECHAZADO", "RESUELTO", "CERRADO"].includes(
-              verifyCheck.Item.estado,
-            )
+            ["APROBADO", "RECHAZADO", "RESUELTO", "CERRADO"].includes(verifyCheck.Item.estado)
           ) {
             isAppealClosed = true;
           }
@@ -186,8 +167,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
             statusCode: 403,
             headers: corsHeaders,
             body: JSON.stringify({
-              error:
-                "Forbidden: El canal de apelación ha sido cerrado y es de solo lectura.",
+              error: "Forbidden: El canal de apelación ha sido cerrado y es de solo lectura.",
             }),
           };
         }
@@ -223,9 +203,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
         }),
       );
       if (dupCheck.Items && dupCheck.Items.length > 0) {
-        console.log(
-          `Duplicate HTTP appeal messageId=${body.messageId} skipped.`,
-        );
+        console.log(`Duplicate HTTP appeal messageId=${body.messageId} skipped.`);
         return {
           statusCode: 200,
           headers: corsHeaders,
@@ -269,13 +247,8 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
           Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
         }),
       );
-      const ownerSub =
-        companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
-      if (
-        ownerSub &&
-        ownerSub !== companyId &&
-        !targetKeys.includes(`USER#${ownerSub}`)
-      ) {
+      const ownerSub = companyProfile.Item?.sub || companyProfile.Item?.cognitoSub;
+      if (ownerSub && ownerSub !== companyId && !targetKeys.includes(`USER#${ownerSub}`)) {
         targetKeys.push(`USER#${ownerSub}`);
       }
     } catch {
@@ -323,8 +296,7 @@ export const sendAppealMessageHttp: APIGatewayProxyHandler = async (
                   attachmentUrl: attachmentUrl || null,
                   attachmentType:
                     body.attachmentType ||
-                    (attachmentUrl &&
-                    /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(attachmentUrl)
+                    (attachmentUrl && /\.(jpg|jpeg|png|webp|gif|svg)($|\?)/i.test(attachmentUrl)
                       ? "image"
                       : "file"),
                   attachmentName: body.attachmentName || "attachment",

@@ -9,6 +9,7 @@ import {
 import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { evaluatePreAi } from "../../utils/preAiFilter";
+import { parseJsonBody } from "../../utils/validator";
 
 export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
   try {
@@ -23,7 +24,11 @@ export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, headers);
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
     const { userUuid } = body;
 
     if (!userUuid) {
@@ -97,14 +102,28 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, headers);
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
     const { author, content, parentId } = body;
 
-    if (!content) {
+    if (!content || typeof content !== "string" || !content.trim()) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: "Falta el contenido del comentario" }),
+      };
+    }
+
+    if (content.length > 2000) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "El comentario excede la longitud máxima permitida (2000 caracteres)",
+        }),
       };
     }
 
@@ -114,9 +133,7 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
         statusCode: 400,
         headers,
         body: JSON.stringify({
-          error:
-            filterResult.explanation ||
-            "El comentario contiene términos no permitidos.",
+          error: filterResult.explanation || "El comentario contiene términos no permitidos.",
           details: filterResult.matches,
         }),
       };
@@ -134,9 +151,7 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
       createdAt,
     };
 
-    const cleanItem = Object.fromEntries(
-      Object.entries(commentItem).filter(([, v]) => v !== null),
-    );
+    const cleanItem = Object.fromEntries(Object.entries(commentItem).filter(([, v]) => v !== null));
 
     await docClient.send(
       new PutCommand({
@@ -154,8 +169,7 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
         }),
       );
       const targetCompany = jobRes.Item?.empresaUuid || jobRes.Item?.companyId;
-      const jobTitle =
-        jobRes.Item?.titulo || jobRes.Item?.title || "tu vacante";
+      const jobTitle = jobRes.Item?.titulo || jobRes.Item?.title || "tu vacante";
 
       if (targetCompany) {
         createUserNotification({
@@ -165,9 +179,7 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
           type: "comment",
           url: `/jobs/${id}`,
           extra: { jobId: id },
-        }).catch((err) =>
-          console.error("Error creating job comment notification:", err),
-        );
+        }).catch((err) => console.error("Error creating job comment notification:", err));
       }
     } catch (e) {
       console.warn("Could not notify company on job comment:", e);
@@ -254,9 +266,7 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
 
     const hasChildren = items.some(
       (item: any) =>
-        item.SK.startsWith("COMMENT#") &&
-        item.parentId === commentId &&
-        !item.isDeleted,
+        item.SK.startsWith("COMMENT#") && item.parentId === commentId && !item.isDeleted,
     );
 
     if (hasChildren) {
@@ -332,7 +342,11 @@ export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const parseRes = parseJsonBody(event.body, headers);
+    if (!parseRes.success) {
+      return parseRes.response;
+    }
+    const body = parseRes.data;
     const { userUuid } = body;
 
     if (!userUuid) {

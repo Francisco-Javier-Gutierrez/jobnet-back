@@ -151,4 +151,3 @@ export function getRfcType(rfc: string): "MORAL" | "FISICA" | "INVALIDO" {
   if (!isValidRfc(rfc)) return "INVALIDO";
   return rfc.trim().length === 12 ? "MORAL" : "FISICA";
 }
-

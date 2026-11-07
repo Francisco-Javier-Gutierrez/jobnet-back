@@ -54,10 +54,7 @@ describe("Gemini Multimodal Moderation Service (Nivel 1)", () => {
         json: async () => mockApiResponse,
       } as any);
 
-      const result = await moderateTextWithAi(
-        "Buscamos Ingeniero Cloud para Toluca.",
-        "VACANCY",
-      );
+      const result = await moderateTextWithAi("Buscamos Ingeniero Cloud para Toluca.", "VACANCY");
       expect(result.safe).toBe(true);
       expect(result.flaggedCategories).toHaveLength(0);
     });

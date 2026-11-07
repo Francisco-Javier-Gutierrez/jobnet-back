@@ -32,8 +32,7 @@ export interface PushNotificationPayload {
 
 export const DEFAULT_VAPID_PUBLIC_KEY =
   "BOIrktuQCHHiOWcKICA7YEwdKJf8WNYCmBS_PI338wnaB9VqXPQfCRwTN5NLYokujXBp5pdD83av6DACG2rAYok";
-export const DEFAULT_VAPID_PRIVATE_KEY =
-  "oJXO_P5wuj45JaC8taPC1E3pPR8Hu1zi_kAiv5yAaNg";
+export const DEFAULT_VAPID_PRIVATE_KEY = "oJXO_P5wuj45JaC8taPC1E3pPR8Hu1zi_kAiv5yAaNg";
 export const DEFAULT_VAPID_SUBJECT = "mailto:contacto@franciscojgh.com";
 
 export function configureWebPush() {
@@ -60,14 +59,8 @@ export async function savePushSubscription(
   subscription: PushSubscriptionData,
   userAgent: string = "unknown",
 ): Promise<void> {
-  if (
-    !subscription?.endpoint ||
-    !subscription?.keys?.p256dh ||
-    !subscription?.keys?.auth
-  ) {
-    throw new Error(
-      "Invalid push subscription format: endpoint and keys are required.",
-    );
+  if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    throw new Error("Invalid push subscription format: endpoint and keys are required.");
   }
 
   const endpointHash = hashEndpoint(subscription.endpoint);
@@ -95,10 +88,7 @@ export async function savePushSubscription(
 /**
  * Elimina una suscripción Push de DynamoDB.
  */
-export async function removePushSubscription(
-  userId: string,
-  endpoint: string,
-): Promise<void> {
+export async function removePushSubscription(userId: string, endpoint: string): Promise<void> {
   if (!endpoint) return;
   const endpointHash = hashEndpoint(endpoint);
 
@@ -178,10 +168,7 @@ export async function sendPushToUser(
               console.error("Error removing expired subscription:", cleanupErr);
             }
           } else {
-            console.error(
-              `Failed to send web push to ${userId}:`,
-              error.message || error,
-            );
+            console.error(`Failed to send web push to ${userId}:`, error.message || error);
           }
         }
       }),
@@ -218,9 +205,7 @@ export async function createUserNotification({
   const timestamp = new Date().toISOString();
   const notifId = Math.random().toString(36).substring(2, 15);
   const truncatedMessage =
-    message && message.length > 120
-      ? message.substring(0, 117) + "..."
-      : message;
+    message && message.length > 120 ? message.substring(0, 117) + "..." : message;
 
   try {
     await docClient.send(
@@ -240,10 +225,7 @@ export async function createUserNotification({
       }),
     );
   } catch (dbErr) {
-    console.error(
-      `Error saving notification to DynamoDB for ${userId}:`,
-      dbErr,
-    );
+    console.error(`Error saving notification to DynamoDB for ${userId}:`, dbErr);
   }
 
   try {
@@ -377,10 +359,7 @@ export async function getAllPushSubscribers(): Promise<PushSubscriberUser[]> {
         const u = userMap.get(userId)!;
         u.devices.push(device);
         u.deviceCount = u.devices.length;
-        if (
-          new Date(device.updatedAt).getTime() >
-          new Date(u.lastActive).getTime()
-        ) {
+        if (new Date(device.updatedAt).getTime() > new Date(u.lastActive).getTime()) {
           u.lastActive = device.updatedAt;
         }
       }
@@ -410,19 +389,13 @@ export async function getAllPushSubscribers(): Promise<PushSubscriberUser[]> {
             u.fotoPerfil = p.fotoPerfil || p.avatarUrl || "";
           }
         } catch (err) {
-          console.warn(
-            `Error al consultar perfil de usuario ${u.userId}:`,
-            err,
-          );
+          console.warn(`Error al consultar perfil de usuario ${u.userId}:`, err);
         }
       }),
     );
 
     // Ordenar por última actividad descendente
-    userList.sort(
-      (a, b) =>
-        new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime(),
-    );
+    userList.sort((a, b) => new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime());
 
     return userList;
   } catch (error) {

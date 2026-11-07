@@ -19,6 +19,7 @@ import {
   executeOrgSuspensionInitiation,
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
+import { parseJsonBody } from "../../utils/validator";
 
 export const getIncidents: APIGatewayProxyHandler = async () => {
   try {
@@ -48,8 +49,7 @@ export const getIncidents: APIGatewayProxyHandler = async () => {
               : item.companyId
                 ? "ORGANIZACION"
                 : "GENERAL"),
-        targetId:
-          item.targetId || item.jobId || item.postId || item.companyId || "",
+        targetId: item.targetId || item.jobId || item.postId || item.companyId || "",
         targetTitle:
           item.targetTitle ||
           item.jobTitle ||
@@ -87,7 +87,11 @@ export const getIncidents: APIGatewayProxyHandler = async () => {
 
 export const createIncident: APIGatewayProxyHandler = async (event) => {
   try {
-    const body = JSON.parse(event.body || "{}");
+    const parseResult = parseJsonBody(event.body, headers);
+    if (!parseResult.success) {
+      return parseResult.response;
+    }
+    const body = parseResult.data;
     const {
       jobId,
       jobTitle,
@@ -104,11 +108,21 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
       infraccion,
     } = body;
 
-    if (!reason) {
+    if (!reason || typeof reason !== "string" || !reason.trim()) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({ error: "Missing body parameter 'reason'" }),
+      };
+    }
+
+    if (reason.length > 2000) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: "El motivo del reporte excede el límite máximo de 2000 caracteres.",
+        }),
       };
     }
 
@@ -120,28 +134,17 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
       SK: "METADATA",
       targetType:
         targetType ||
-        (jobId
-          ? "VACANTE"
-          : postId
-            ? "POST"
-            : companyId
-              ? "ORGANIZACION"
-              : "GENERAL"),
+        (jobId ? "VACANTE" : postId ? "POST" : companyId ? "ORGANIZACION" : "GENERAL"),
       targetId: targetId || jobId || postId || companyId || "",
       targetTitle: targetTitle || jobTitle || postTitle || companyName || "",
       jobId: jobId || (targetType === "VACANTE" ? targetId : ""),
       jobTitle: jobTitle || (targetType === "VACANTE" ? targetTitle : ""),
       postId: postId || (targetType === "POST" ? targetId : ""),
       companyId:
-        companyId ||
-        (targetType === "ORGANIZACION" || targetType === "EMPRESA"
-          ? targetId
-          : ""),
+        companyId || (targetType === "ORGANIZACION" || targetType === "EMPRESA" ? targetId : ""),
       companyName:
         companyName ||
-        (targetType === "ORGANIZACION" || targetType === "EMPRESA"
-          ? targetTitle
-          : ""),
+        (targetType === "ORGANIZACION" || targetType === "EMPRESA" ? targetTitle : ""),
       reporter: reporter || "Anónimo",
       reason,
       severity: severity || "media",
@@ -151,9 +154,7 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     };
 
     // Remove empty attributes
-    const cleanItem = Object.fromEntries(
-      Object.entries(incidentItem).filter(([, v]) => v !== ""),
-    );
+    const cleanItem = Object.fromEntries(Object.entries(incidentItem).filter(([, v]) => v !== ""));
 
     await docClient.send(
       new PutCommand({
@@ -169,9 +170,7 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     let incidentCount = 1;
 
     if (jobId) {
-      const twelveHoursAgo = new Date(
-        Date.now() - 12 * 60 * 60 * 1000,
-      ).toISOString();
+      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
 
       const existingReportsResult = await docClient.send(
         new ScanCommand({
@@ -218,8 +217,7 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
           targetId: jobId,
           targetType: "VACANTE",
           action: "SUSPENSION_AUTOMATICA_RF72",
-          reason:
-            "Acumulación de 5 o más denuncias en menos de 12 horas (RF-72)",
+          reason: "Acumulación de 5 o más denuncias en menos de 12 horas (RF-72)",
           executorId: "SISTEMA_AUTOGUARDIA",
         });
       }
@@ -340,16 +338,13 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
         }),
       );
       if (vacancyRes.Item) {
-        targetCompanyId =
-          vacancyRes.Item.empresaUuid || vacancyRes.Item.companyId;
+        targetCompanyId = vacancyRes.Item.empresaUuid || vacancyRes.Item.companyId;
       }
     }
 
     // Require at least 3 messages from the organization if resolving an evaluated incident/appeal
     if (
-      (existing.Item.estatus === "EVALUACION" ||
-        action === "approve" ||
-        action === "block") &&
+      (existing.Item.estatus === "EVALUACION" || action === "approve" || action === "block") &&
       incident.jobId
     ) {
       if (targetCompanyId) {
@@ -368,11 +363,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
 
     // Update incident status
     const newStatus =
-      action === "block"
-        ? "BLOQUEADO"
-        : action === "evaluate"
-          ? "EVALUACION"
-          : "RESUELTO";
+      action === "block" ? "BLOQUEADO" : action === "evaluate" ? "EVALUACION" : "RESUELTO";
     await docClient.send(
       new UpdateCommand({
         TableName: tableName,
@@ -380,8 +371,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
           PK: `INCIDENT#${incidentId}`,
           SK: "METADATA",
         },
-        UpdateExpression:
-          "SET estatus = :status, fechaActualizacion = :updated",
+        UpdateExpression: "SET estatus = :status, fechaActualizacion = :updated",
         ExpressionAttributeValues: {
           ":status": newStatus,
           ":updated": new Date().toISOString(),
@@ -448,10 +438,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             url: "/notifications",
             data: { type: "SUSPENSION_CONFIRMED" },
           }).catch((err) =>
-            console.error(
-              "Error sending push for incident unfavorable resolution:",
-              err,
-            ),
+            console.error("Error sending push for incident unfavorable resolution:", err),
           );
         }
 
@@ -505,9 +492,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
                     },
                   }),
                 )
-                .catch((err) =>
-                  console.error("Error sending SES block email:", err),
-                );
+                .catch((err) => console.error("Error sending SES block email:", err));
 
               const compDomain = companyEmail.split("@")[1];
               await blockCorporateDomain(
@@ -518,10 +503,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             }
           }
         } catch (e) {
-          console.error(
-            "Error auto-blocking corporate domain on incident resolve:",
-            e,
-          );
+          console.error("Error auto-blocking corporate domain on incident resolve:", e);
         }
 
         // Close the appeal chat for the organization
@@ -562,8 +544,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               PK: `VACANCY#${incident.jobId}`,
               SK: "METADATA",
             },
-            UpdateExpression:
-              "SET estado = :evaluation, fechaLimiteApelacion = :grace",
+            UpdateExpression: "SET estado = :evaluation, fechaLimiteApelacion = :grace",
             ExpressionAttributeValues: {
               ":evaluation": "EVALUACION",
               ":grace": graceLimit.toISOString(),
@@ -593,8 +574,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             }),
           );
 
-          const companyEmail =
-            companyProfile.Item?.email || "empresa@jobnet.com";
+          const companyEmail = companyProfile.Item?.email || "empresa@jobnet.com";
           const jobTitle = vacancy.Item.titulo || "Vacante";
 
           // RF-23 Fase 1: Notificación in-app persistente
@@ -609,9 +589,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
                 type: "SUSPENSION_NOTICE",
                 title: "Notificación Oficial: Vacante Pausada para Evaluación",
                 message: `Su publicación de empleo "${jobTitle}" ha sido pausada preventivamente por denuncias de infracción. Dispone de un periodo de gracia hasta el ${graceLimit.toLocaleDateString()} para presentar su apelación a través del soporte.`,
-                reason:
-                  incident.reason ||
-                  "Evaluación preventiva por reportes acumulados",
+                reason: incident.reason || "Evaluación preventiva por reportes acumulados",
                 gracePeriodEnd: graceLimit.toISOString(),
                 createdAt: timestamp,
                 read: false,
@@ -630,9 +608,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               type: "SUSPENSION_NOTICE",
               companyId: vacancy.Item.empresaUuid,
             },
-          }).catch((err) =>
-            console.error("Error sending push for paused vacancy:", err),
-          );
+          }).catch((err) => console.error("Error sending push for paused vacancy:", err));
 
           // Send warning email via SES
           await sesClient
@@ -654,12 +630,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
                 },
               }),
             )
-            .catch((err) =>
-              console.error(
-                "Error sending SES email for vacancy evaluation:",
-                err,
-              ),
-            );
+            .catch((err) => console.error("Error sending SES email for vacancy evaluation:", err));
         }
       } else if (action === "approve") {
         // Fase 3 — Reactivar vacante (apelación favorable)
@@ -680,8 +651,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               PK: `VACANCY#${incident.jobId}`,
               SK: "METADATA",
             },
-            UpdateExpression:
-              "SET estado = :active, fechaLimiteApelacion = :nullVal",
+            UpdateExpression: "SET estado = :active, fechaLimiteApelacion = :nullVal",
             ExpressionAttributeValues: {
               ":active": "Activa",
               ":nullVal": null,
@@ -715,10 +685,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
             url: "/notifications",
             data: { type: "SUSPENSION_CANCELED" },
           }).catch((err) =>
-            console.error(
-              "Error sending push for incident favorable resolution:",
-              err,
-            ),
+            console.error("Error sending push for incident favorable resolution:", err),
           );
 
           try {
@@ -756,9 +723,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
                     },
                   }),
                 )
-                .catch((err) =>
-                  console.error("Error sending SES approve email:", err),
-                );
+                .catch((err) => console.error("Error sending SES approve email:", err));
             }
           } catch (e) {
             console.error("Error sending approve email:", e);
@@ -782,8 +747,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
       if (action === "evaluate") {
         await executeOrgSuspensionInitiation(
           targetCompanyId,
-          incident.reason ||
-            "Revisión por reportes e incidencias de organización",
+          incident.reason || "Revisión por reportes e incidencias de organización",
           4,
         );
       } else if (action === "block") {

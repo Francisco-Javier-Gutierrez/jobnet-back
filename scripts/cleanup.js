@@ -1,14 +1,6 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const {
-  DynamoDBDocumentClient,
-  ScanCommand,
-  PutCommand,
-} = require("@aws-sdk/lib-dynamodb");
-const {
-  S3Client,
-  ListObjectsV2Command,
-  DeleteObjectCommand,
-} = require("@aws-sdk/client-s3");
+const { DynamoDBDocumentClient, ScanCommand, PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { S3Client, ListObjectsV2Command, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 
 const REGION = "us-east-1";
 const TABLE_NAME = "jobnet-jobs-prod";
@@ -24,9 +16,7 @@ const WRONG_URL = `http://${BUCKET_NAME}.s3-website-${REGION}.amazonaws.com`;
 const CORRECT_URL = `https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com`;
 
 async function main() {
-  console.log(
-    `Starting cleanup on Table: ${TABLE_NAME} and Bucket: ${BUCKET_NAME}...`,
-  );
+  console.log(`Starting cleanup on Table: ${TABLE_NAME} and Bucket: ${BUCKET_NAME}...`);
 
   let lastEvaluatedKey = undefined;
   const allItems = [];
@@ -82,16 +72,12 @@ async function main() {
         }),
       );
       updatedCount++;
-      console.log(
-        `Fixed URLs in DB Item PK: ${fixedItem.PK} | SK: ${fixedItem.SK}`,
-      );
+      console.log(`Fixed URLs in DB Item PK: ${fixedItem.PK} | SK: ${fixedItem.SK}`);
     }
   }
 
   console.log(`Updated ${updatedCount} DB items.`);
-  console.log(
-    `Found ${activeS3Keys.size} active S3 object keys in the database.`,
-  );
+  console.log(`Found ${activeS3Keys.size} active S3 object keys in the database.`);
 
   // 3. List all objects in S3
   let isTruncated = true;

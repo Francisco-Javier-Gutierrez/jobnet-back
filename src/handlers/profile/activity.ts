@@ -1,18 +1,11 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { QueryCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
-import {
-  docClient,
-  tableName,
-  headers,
-  enrichJobItem,
-  enrichPostsWithRelations,
-} from "./common";
+import { docClient, tableName, headers, enrichJobItem, enrichPostsWithRelations } from "./common";
 
 export const getProfileVacancies: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
-    if (!id)
-      return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
+    if (!id) return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
 
     const page = event.queryStringParameters?.page
       ? parseInt(event.queryStringParameters.page, 10)
@@ -90,8 +83,7 @@ export const getProfileVacancies: APIGatewayProxyHandler = async (event) => {
 export const getProfilePosts: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
-    if (!id)
-      return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
+    if (!id) return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
 
     const page = event.queryStringParameters?.page
       ? parseInt(event.queryStringParameters.page, 10)
@@ -122,18 +114,13 @@ export const getProfilePosts: APIGatewayProxyHandler = async (event) => {
     } while (lastEvaluatedKey);
 
     const userPosts = items.sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     );
 
     const total = userPosts.length;
     const totalPages = Math.ceil(total / limit);
     const paginated = userPosts.slice((page - 1) * limit, page * limit);
-    const enrichedPaginated = await enrichPostsWithRelations(
-      paginated,
-      docClient,
-      tableName,
-    );
+    const enrichedPaginated = await enrichPostsWithRelations(paginated, docClient, tableName);
 
     return {
       statusCode: 200,
@@ -157,8 +144,7 @@ export const getProfilePosts: APIGatewayProxyHandler = async (event) => {
 export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
   try {
     const id = event.pathParameters?.id;
-    if (!id)
-      return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
+    if (!id) return { statusCode: 400, headers, body: '{"error":"Missing id"}' };
 
     // Directiva de privacidad y protección de datos: elementos guardados son estrictamente privados y confidenciales
     const callerId =
@@ -196,9 +182,7 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
     const limit = event.queryStringParameters?.limit
       ? parseInt(event.queryStringParameters.limit, 10)
       : 20;
-    const typeFilter = (
-      event.queryStringParameters?.type || "all"
-    ).toLowerCase();
+    const typeFilter = (event.queryStringParameters?.type || "all").toLowerCase();
 
     const items: any[] = [];
     let lastEvaluatedKey: any = undefined;
@@ -225,26 +209,19 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
     let filteredItems = items;
     if (typeFilter === "posts") {
       filteredItems = items.filter(
-        (i) =>
-          (i.PK && i.PK.startsWith("POST#")) ||
-          (i.GSI1SK && i.GSI1SK.startsWith("POST#")),
+        (i) => (i.PK && i.PK.startsWith("POST#")) || (i.GSI1SK && i.GSI1SK.startsWith("POST#")),
       );
     } else if (typeFilter === "jobs" || typeFilter === "vacancies") {
       filteredItems = items.filter(
         (i) =>
-          (i.PK && i.PK.startsWith("VACANCY#")) ||
-          (i.GSI1SK && i.GSI1SK.startsWith("VACANCY#")),
+          (i.PK && i.PK.startsWith("VACANCY#")) || (i.GSI1SK && i.GSI1SK.startsWith("VACANCY#")),
       );
     }
 
     // Sort bookmarks by when they were saved (newest first)
     filteredItems.sort((a, b) => {
-      const dateA = a.fechaInteraccion
-        ? new Date(a.fechaInteraccion).getTime()
-        : 0;
-      const dateB = b.fechaInteraccion
-        ? new Date(b.fechaInteraccion).getTime()
-        : 0;
+      const dateA = a.fechaInteraccion ? new Date(a.fechaInteraccion).getTime() : 0;
+      const dateB = b.fechaInteraccion ? new Date(b.fechaInteraccion).getTime() : 0;
       return dateB - dateA;
     });
 
@@ -278,17 +255,11 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
       }
     }
 
-    const rawPosts = paginatedRaw.filter(
-      (i) => i.PK && i.PK.startsWith("POST#"),
-    );
-    const rawJobs = paginatedRaw.filter(
-      (i) => i.PK && i.PK.startsWith("VACANCY#"),
-    );
+    const rawPosts = paginatedRaw.filter((i) => i.PK && i.PK.startsWith("POST#"));
+    const rawJobs = paginatedRaw.filter((i) => i.PK && i.PK.startsWith("VACANCY#"));
 
     const enrichedPosts =
-      rawPosts.length > 0
-        ? await enrichPostsWithRelations(rawPosts, docClient, tableName)
-        : [];
+      rawPosts.length > 0 ? await enrichPostsWithRelations(rawPosts, docClient, tableName) : [];
 
     const enrichedJobs = rawJobs.map((jobItem) => {
       const jId = jobItem.id || jobItem.PK.replace("VACANCY#", "");

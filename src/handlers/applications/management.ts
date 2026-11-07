@@ -1,18 +1,7 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
-import {
-  QueryCommand,
-  UpdateCommand,
-  GetCommand,
-  PutCommand,
-} from "@aws-sdk/lib-dynamodb";
+import { QueryCommand, UpdateCommand, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
-import {
-  docClient,
-  sesClient,
-  tableName,
-  VALID_STATUSES,
-  headers,
-} from "./common";
+import { docClient, sesClient, tableName, VALID_STATUSES, headers } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
 
 /**
@@ -124,9 +113,7 @@ export const getMyApplications: APIGatewayProxyHandler = async (event) => {
  * Body: { status }
  * Updates both the JOB# and USER# items
  */
-export const updateApplicationStatus: APIGatewayProxyHandler = async (
-  event,
-) => {
+export const updateApplicationStatus: APIGatewayProxyHandler = async (event) => {
   try {
     const jobId = event.pathParameters?.jobId;
     const candidateId = event.pathParameters?.candidateId;
@@ -174,16 +161,14 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
     }
 
     if (
-      (existing.Item.status === "SELECCIONADO" ||
-        existing.Item.status === "CONTRATADO") &&
+      (existing.Item.status === "SELECCIONADO" || existing.Item.status === "CONTRATADO") &&
       status === "RECHAZADO"
     ) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({
-          error:
-            "No se puede descartar a un candidato que ya ha sido seleccionado o contratado.",
+          error: "No se puede descartar a un candidato que ya ha sido seleccionado o contratado.",
         }),
       };
     }
@@ -255,16 +240,14 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
     );
 
     const candidateEmail = candidateProfile.Item?.email;
-    const jobTitle =
-      jobDetail.Item?.titulo || jobDetail.Item?.title || "Vacante";
+    const jobTitle = jobDetail.Item?.titulo || jobDetail.Item?.title || "Vacante";
     const companyName = jobDetail.Item?.company || "Empresa";
 
     let notifTitle = "";
     let notifMessage = "";
 
     if (status === "RECHAZADO") {
-      const reasonStr =
-        motivoRechazo || "No se especificó un motivo particular.";
+      const reasonStr = motivoRechazo || "No se especificó un motivo particular.";
       notifTitle = `Actualización de Postulación: ${jobTitle}`;
       notifMessage = `Tu postulación para la vacante "${jobTitle}" en "${companyName}" ha sido descartada. Motivo: ${reasonStr}`;
 
@@ -288,8 +271,7 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
       }
     } else if (status === "EN_CONTACTO") {
       const detailsStr =
-        detallesEntrevista ||
-        "El equipo de reclutamiento se pondrá en contacto pronto.";
+        detallesEntrevista || "El equipo de reclutamiento se pondrá en contacto pronto.";
       notifTitle = `Avance en Proceso de Selección: ${jobTitle}`;
       notifMessage = `Tu postulación para "${jobTitle}" avanza a la etapa de contacto. Detalles: ${detailsStr}`;
 
@@ -381,9 +363,7 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (
         body: notifMessage,
         url: "/candidate/my-applications",
         data: { jobId, type: "APPLICATION_UPDATE" },
-      }).catch((err) =>
-        console.error("Error sending application update push:", err),
-      );
+      }).catch((err) => console.error("Error sending application update push:", err));
     }
 
     return {

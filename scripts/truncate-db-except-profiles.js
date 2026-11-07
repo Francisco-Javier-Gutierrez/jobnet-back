@@ -1,9 +1,5 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const {
-  DynamoDBDocumentClient,
-  ScanCommand,
-  DeleteCommand,
-} = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, ScanCommand, DeleteCommand } = require("@aws-sdk/lib-dynamodb");
 
 const REGION = "us-east-1";
 const TABLE_NAME = "jobnet-jobs-prod"; // Ajusta esto si tu tabla se llama distinto
@@ -15,9 +11,7 @@ const docClient = DynamoDBDocumentClient.from(dynamoClient);
 
 async function truncateTable() {
   console.log(`Starting database truncate on table: ${TABLE_NAME}...`);
-  console.log(
-    "Rule: Deleting everything EXCEPT (PK begins with 'USER#' AND SK == 'PROFILE')",
-  );
+  console.log("Rule: Deleting everything EXCEPT (PK begins with 'USER#' AND SK == 'PROFILE')");
 
   let lastEvaluatedKey = undefined;
   let itemsDeleted = 0;
