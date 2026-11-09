@@ -189,6 +189,8 @@ export const listProfiles: APIGatewayProxyHandler = async (event) => {
           (p.nombre && p.nombre.toLowerCase().includes(q)) ||
           (p.email && p.email.toLowerCase().includes(q)) ||
           (p.titular && p.titular.toLowerCase().includes(q)) ||
+          (p.tituloProfesional && p.tituloProfesional.toLowerCase().includes(q)) ||
+          (p.titularProfesional && p.titularProfesional.toLowerCase().includes(q)) ||
           (p.sector && p.sector.toLowerCase().includes(q)),
       );
     }
