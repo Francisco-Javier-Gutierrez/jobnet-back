@@ -166,6 +166,14 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       applicationData.coverLetter = coverLetter;
     }
 
+    if (body.cvUrl) {
+      applicationData.cvUrl = body.cvUrl;
+    }
+
+    if (body.cvFileName) {
+      applicationData.cvFileName = body.cvFileName;
+    }
+
     if (body.respuestasFiltro) {
       applicationData.respuestasFiltro = body.respuestasFiltro;
     }
