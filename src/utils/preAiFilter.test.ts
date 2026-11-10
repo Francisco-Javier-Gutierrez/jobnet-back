@@ -145,5 +145,15 @@ describe("Pre-AI Filtering Engine (Nivel 0 - Costo $0.00)", () => {
       expect(res.isClean).toBe(false);
       expect(res.matches).toContain("inversion inicial requerida");
     });
+
+    it("should detect explicit sexual content and NSFW vulgarities", () => {
+      const res = evaluatePreAi("publicacion con sexo anal inapropiado");
+      expect(res.isClean).toBe(false);
+      expect(res.categories).toContain("Contenido Sexual y Adulto Inapropiado");
+      expect(res.matches).toContain("sexo anal");
+
+      expect(evaluatePreAi("sexo anal").isClean).toBe(false);
+      expect(evaluatePreAi("distribucion de pornografia").isClean).toBe(false);
+    });
   });
 });
