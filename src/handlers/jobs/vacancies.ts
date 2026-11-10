@@ -253,9 +253,18 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
               }
             }
           }
-          j.likesCount = j.likesList.length;
-          j.bookmarksCount = j.bookmarksList.length;
-          j.commentsCount = commentsCount;
+          j.likesCount =
+            typeof j.likesCount === "number"
+              ? Math.max(j.likesCount, j.likesList.length)
+              : j.likesList.length;
+          j.bookmarksCount =
+            typeof j.bookmarksCount === "number"
+              ? Math.max(j.bookmarksCount, j.bookmarksList.length)
+              : j.bookmarksList.length;
+          j.commentsCount =
+            typeof j.commentsCount === "number"
+              ? Math.max(j.commentsCount, commentsCount)
+              : commentsCount;
           j.sharesCount = j.sharesCount || 0;
         } catch {
           // Ignore error and return base job
@@ -630,6 +639,10 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
         new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
       alertaCaducidadEnviada: false,
       alertaAltaDemandaEnviada: false,
+      sharesCount: 0,
+      likesCount: 0,
+      bookmarksCount: 0,
+      commentsCount: 0,
     };
 
     if (
@@ -1041,7 +1054,8 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    // Soft delete: set estado to CERRADA and add deletedAt timestamp
+    // Soft delete: set estado to CERRADA and add deletedAt timestamp with role tracking
+    const effectiveRole = isPrivileged ? callerRole : "ORGANIZACION";
     await docClient.send(
       new UpdateCommand({
         TableName: tableName,
@@ -1049,9 +1063,13 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
           PK: `VACANCY#${id}`,
           SK: "METADATA",
         },
-        UpdateExpression: "SET estado = :estado, deletedAt = :deletedAt",
+        UpdateExpression:
+          "SET estado = :estado, isDeleted = :isDeleted, deletedByRole = :delRole, deletedByUserId = :delId, deletedAt = :deletedAt",
         ExpressionAttributeValues: {
           ":estado": "CERRADA",
+          ":isDeleted": true,
+          ":delRole": effectiveRole,
+          ":delId": callerId || effectiveRole,
           ":deletedAt": new Date().toISOString(),
         },
       }),

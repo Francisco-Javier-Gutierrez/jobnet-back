@@ -107,4 +107,63 @@ describe("profile common", () => {
     );
     expect(results3).toHaveLength(1);
   });
+
+  it("should enrich jobs with relations including likesList, bookmarksList and commentsCount", async () => {
+    const { enrichJobsWithRelations } = await import("./common");
+
+    // Empty array branch
+    const empty = await enrichJobsWithRelations([], {} as any, "table");
+    expect(empty).toEqual([]);
+
+    // Mock client with relations
+    const mockClient = {
+      send: vi.fn().mockResolvedValue({
+        Items: [
+          { SK: "LIKE#user-100" },
+          { SK: "BOOKMARK#user-200" },
+          {
+            SK: "COMMENT#2026-01-01",
+            content: "Excelente oportunidad",
+            isDeleted: false,
+          },
+          {
+            SK: "COMMENT#2026-01-02",
+            isDeleted: true,
+          },
+        ],
+      }),
+    };
+
+    const job1 = {
+      PK: "VACANCY#job-1",
+      titulo: "Arquitecto Cloud",
+      company: "Tech Corp",
+      salario: 80000,
+      modalidad: "Remoto",
+      sharesCount: 3,
+    };
+
+    const results = await enrichJobsWithRelations([job1], mockClient, "table");
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe("job-1");
+    expect(results[0].likesList).toContain("user-100");
+    expect(results[0].likesCount).toBe(1);
+    expect(results[0].bookmarksList).toContain("user-200");
+    expect(results[0].bookmarksCount).toBe(1);
+    expect(results[0].commentsCount).toBe(1);
+    expect(results[0].sharesCount).toBe(3);
+
+    // Error handling branch in query
+    const failingClient = {
+      send: vi.fn().mockRejectedValue(new Error("DynamoDB error")),
+    };
+    const fallbackResults = await enrichJobsWithRelations(
+      [{ PK: "VACANCY#job-err", titulo: "Dev" }],
+      failingClient,
+      "table",
+    );
+    expect(fallbackResults).toHaveLength(1);
+    expect(fallbackResults[0].likesList).toHaveLength(0);
+    expect(fallbackResults[0].likesCount).toBe(0);
+  });
 });

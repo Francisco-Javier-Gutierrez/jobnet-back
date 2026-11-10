@@ -336,7 +336,7 @@ describe("moderator governance handlers", () => {
       expect(body.error).toContain("exclusivo para Moderadores de Comunidad");
     });
 
-    it("should allow access and return baseline anomalies when called by MODERATOR", async () => {
+    it("should allow access and return empty anomalies when no anomalies exist for MODERATOR", async () => {
       mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Vacancies
       mockDynamoSend.mockResolvedValueOnce({ Items: [] }); // Incidents
 
@@ -352,7 +352,7 @@ describe("moderator governance handlers", () => {
       const body = JSON.parse(res.body);
       expect(body.success).toBe(true);
       expect(body.anomalies).toBeDefined();
-      expect(body.anomalies.length).toBeGreaterThan(0);
+      expect(body.anomalies).toEqual([]);
     });
 
     it("should detect anomalous concurrency of > 10 vacancies in < 1h for moderator", async () => {

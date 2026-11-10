@@ -254,6 +254,10 @@ describe("profile activity handlers", () => {
         },
       }); // BatchGetCommand vacancies
 
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [{ SK: "LIKE#user-viewer" }, { SK: "BOOKMARK#u-1" }],
+      }); // Query vacancy relations
+
       const res = await getProfileBookmarks(
         {
           pathParameters: { id: "u-1" },
@@ -267,6 +271,8 @@ describe("profile activity handlers", () => {
       expect(data.data).toHaveLength(1);
       expect(data.data[0].id).toBe("job-1");
       expect(data.data[0].title).toBe("Senior Cloud Engineer");
+      expect(data.data[0].likesList).toContain("user-viewer");
+      expect(data.data[0].likesCount).toBe(1);
       expect(data.jobs).toHaveLength(1);
     });
 

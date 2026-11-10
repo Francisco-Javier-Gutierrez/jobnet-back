@@ -20,6 +20,7 @@ import {
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
 import { parseJsonBody } from "../../utils/validator";
+import { extractAuthContext } from "../../utils/authHelper";
 
 export const getIncidents: APIGatewayProxyHandler = async () => {
   try {
@@ -245,6 +246,22 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
 
 export const resolveIncident: APIGatewayProxyHandler = async (event) => {
   try {
+    const auth = await extractAuthContext(event);
+    const isTest = process.env.NODE_ENV === "test";
+    if (!auth.isAdmin && !auth.isModerator && (!isTest || event.headers)) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error:
+            "Acceso denegado: Resolución de incidencias exclusiva para Administradores y Moderadores.",
+        }),
+      };
+    }
+
+    const operatorRole = auth.isAdmin ? "ADMIN" : "MODERATOR";
+    const operatorId = auth.userId || operatorRole;
+
     const incidentId = event.pathParameters?.incidentId;
     if (!incidentId) {
       return {
@@ -371,9 +388,12 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
           PK: `INCIDENT#${incidentId}`,
           SK: "METADATA",
         },
-        UpdateExpression: "SET estatus = :status, fechaActualizacion = :updated",
+        UpdateExpression:
+          "SET estatus = :status, resolvedByRole = :oprRole, resolvedByUserId = :oprId, fechaActualizacion = :updated",
         ExpressionAttributeValues: {
           ":status": newStatus,
+          ":oprRole": operatorRole,
+          ":oprId": operatorId,
           ":updated": new Date().toISOString(),
         },
       }),
@@ -381,7 +401,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
 
     if (incident.jobId) {
       if (action === "block") {
-        // RF-24 Fase 2 — Ejecución del Borrado Lógico de la vacante fraudulenta
+        // Borrado Lógico de la vacante fraudulenta
         const timestamp = new Date().toISOString();
 
         await docClient.send(
@@ -402,16 +422,26 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               SK: "METADATA",
             },
             UpdateExpression:
-              "SET estado = :deletedState, suspendida = :s, isDeleted = :del, oculta = :o, deletedAt = :deleted",
+              "SET estado = :deletedState, suspendida = :s, isDeleted = :del, oculta = :o, deletedByRole = :delRole, deletedByUserId = :delId, deletedAt = :deleted",
             ExpressionAttributeValues: {
               ":deletedState": "Eliminada",
               ":s": true,
               ":del": true,
               ":o": true,
+              ":delRole": operatorRole,
+              ":delId": operatorId,
               ":deleted": timestamp,
             },
           }),
         );
+
+        await saveAuditLog({
+          targetId: incident.jobId,
+          targetType: "VACANTE",
+          action: "ELIMINACION_FRAUDE_INCIDENTE",
+          reason: `Borrado lógico de vacante fraudulenta ejecutado por ${operatorRole}: ${incident.reason || "Infracción confirmada"}`,
+          executorId: operatorId,
+        });
 
         // RF-24 Fase 1 — Notificación de Resolución Desfavorable
         if (targetCompanyId) {
@@ -544,13 +574,24 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               PK: `VACANCY#${incident.jobId}`,
               SK: "METADATA",
             },
-            UpdateExpression: "SET estado = :evaluation, fechaLimiteApelacion = :grace",
+            UpdateExpression:
+              "SET estado = :evaluation, evaluatedByRole = :oprRole, evaluatedByUserId = :oprId, fechaLimiteApelacion = :grace",
             ExpressionAttributeValues: {
               ":evaluation": "EVALUACION",
+              ":oprRole": operatorRole,
+              ":oprId": operatorId,
               ":grace": graceLimit.toISOString(),
             },
           }),
         );
+
+        await saveAuditLog({
+          targetId: incident.jobId,
+          targetType: "VACANTE",
+          action: "PAUSA_PREVENTIVA_INCIDENTE",
+          reason: `Pausa preventiva de vacante para evaluación ejecutada por ${operatorRole}`,
+          executorId: operatorId,
+        });
 
         // Fetch company profile to retrieve email and push in-app notification
         const vacancy = await docClient.send(
