@@ -19,28 +19,48 @@ export const dbClient = isOffline
 
 export const docClient = DynamoDBDocumentClient.from(dbClient);
 
-export const s3Client = isOffline
-  ? new S3Client({
-      endpoint: "http://localhost:4569",
-      region: "localhost",
-      credentials: {
-        accessKeyId: "local",
-        secretAccessKey: "local",
-      },
-      forcePathStyle: true,
-    })
-  : new S3Client({});
+let _s3Client: S3Client | null = null;
+export const getS3Client = (): S3Client => {
+  if (!_s3Client) {
+    _s3Client = isOffline
+      ? new S3Client({
+          endpoint: "http://localhost:4569",
+          region: "localhost",
+          credentials: {
+            accessKeyId: "local",
+            secretAccessKey: "local",
+          },
+          forcePathStyle: true,
+        })
+      : new S3Client({});
+  }
+  return _s3Client;
+};
 
-export const sesClient = isOffline
-  ? new SESClient({
-      endpoint: "http://localhost:4565",
-      region: "localhost",
-      credentials: {
-        accessKeyId: "local",
-        secretAccessKey: "local",
-      },
-    })
-  : new SESClient({});
+export const s3Client = new Proxy({} as S3Client, {
+  get: (_, prop) => (getS3Client() as any)[prop],
+});
+
+let _sesClient: SESClient | null = null;
+export const getSesClient = (): SESClient => {
+  if (!_sesClient) {
+    _sesClient = isOffline
+      ? new SESClient({
+          endpoint: "http://localhost:4565",
+          region: "localhost",
+          credentials: {
+            accessKeyId: "local",
+            secretAccessKey: "local",
+          },
+        })
+      : new SESClient({});
+  }
+  return _sesClient;
+};
+
+export const sesClient = new Proxy({} as SESClient, {
+  get: (_, prop) => (getSesClient() as any)[prop],
+});
 
 export const tableName = process.env.DYNAMODB_TABLE || "jobnet-jobs-prod";
 export const bucketName = process.env.S3_UPLOAD_BUCKET || "jobnet-uploads-prod";

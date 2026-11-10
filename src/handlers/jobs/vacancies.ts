@@ -3,10 +3,6 @@ import { QueryCommand, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/li
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { docClient, tableName, enrichJobItem } from "./common";
-import { createUserNotification } from "../../utils/webPushService";
-import { evaluatePreAi } from "../../utils/preAiFilter";
-import { moderateTextWithAi } from "../../utils/geminiModeration";
-import { moderateS3Media } from "../../utils/s3ModerationHelper";
 import {
   parseJsonBody,
   validateSchema,
@@ -15,6 +11,11 @@ import {
   positiveInteger,
 } from "../../utils/validator";
 import { extractAuthContext } from "../../utils/authHelper";
+
+// In-memory suspension cache for warm Lambda executions in production
+let cachedSuspendedCompanies: Set<string> | null = null;
+let lastSuspensionFetch = 0;
+const SUSPENSION_CACHE_TTL = 60 * 1000;
 
 const createVacancySchema = z.object({
   title: z.string().trim().max(200).optional(),
@@ -59,41 +60,55 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
     const companyIdParam = queryParams.companyId || queryParams.empresaUuid || "";
     const includePaused = queryParams.includePaused === "true" || Boolean(companyIdParam);
 
-    // 1. Fetch all company profiles to check status
-    const profilesItems: any[] = [];
-    let profilesLastKey: any = undefined;
+    // 1. Fetch all company profiles to check status (cached in warm production containers)
+    let suspendedCompanies = new Set<string>();
+    const isTest = process.env.VITEST === "true" || process.env.NODE_ENV === "test";
 
-    do {
-      const profilesResult = await docClient.send(
-        new QueryCommand({
-          TableName: tableName,
-          IndexName: "GSI1",
-          KeyConditionExpression: "GSI1PK = :gsiPk",
-          ExpressionAttributeValues: {
-            ":gsiPk": "PROFILE",
-          },
-          ExclusiveStartKey: profilesLastKey,
-        }),
-      );
-      if (profilesResult.Items) {
-        profilesItems.push(...profilesResult.Items);
-      }
-      profilesLastKey = profilesResult.LastEvaluatedKey;
-    } while (profilesLastKey);
+    if (
+      !isTest &&
+      cachedSuspendedCompanies &&
+      Date.now() - lastSuspensionFetch < SUSPENSION_CACHE_TTL
+    ) {
+      suspendedCompanies = cachedSuspendedCompanies;
+    } else {
+      const profilesItems: any[] = [];
+      let profilesLastKey: any = undefined;
 
-    const suspendedCompanies = new Set<string>();
-    profilesItems.forEach((p: any) => {
-      const companyId = p.PK.replace("USER#", "");
-      if (p.estadoCuenta === "SUSPENDIDA" || p.estadoCuenta === "SUSPENDIDA_TEMPORAL") {
-        if (p.estadoCuenta === "SUSPENDIDA_TEMPORAL" && p.fechaFinSuspension) {
-          if (new Date() < new Date(p.fechaFinSuspension)) {
+      do {
+        const profilesResult = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            IndexName: "GSI1",
+            KeyConditionExpression: "GSI1PK = :gsiPk",
+            ExpressionAttributeValues: {
+              ":gsiPk": "PROFILE",
+            },
+            ExclusiveStartKey: profilesLastKey,
+          }),
+        );
+        if (profilesResult.Items) {
+          profilesItems.push(...profilesResult.Items);
+        }
+        profilesLastKey = profilesResult.LastEvaluatedKey;
+      } while (profilesLastKey);
+
+      suspendedCompanies = new Set<string>();
+      profilesItems.forEach((p: any) => {
+        const companyId = p.PK.replace("USER#", "");
+        if (p.estadoCuenta === "SUSPENDIDA" || p.estadoCuenta === "SUSPENDIDA_TEMPORAL") {
+          if (p.estadoCuenta === "SUSPENDIDA_TEMPORAL" && p.fechaFinSuspension) {
+            if (new Date() < new Date(p.fechaFinSuspension)) {
+              suspendedCompanies.add(companyId);
+            }
+          } else {
             suspendedCompanies.add(companyId);
           }
-        } else {
-          suspendedCompanies.add(companyId);
         }
-      }
-    });
+      });
+
+      cachedSuspendedCompanies = suspendedCompanies;
+      lastSuspensionFetch = Date.now();
+    }
 
     // 2. Fetch all vacancies using GSI1 (Query is much faster and cheaper)
     const vacanciesItems: any[] = [];
@@ -230,6 +245,17 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
     // Enrich missing likes, comments and bookmarks per job in the current page slice
     const enrichedItems = await Promise.all(
       items.map(async (j) => {
+        // Fast path: if atomic counters are already present, skip DynamoDB query
+        if (
+          typeof j.likesCount === "number" &&
+          typeof j.bookmarksCount === "number" &&
+          typeof j.commentsCount === "number" &&
+          Array.isArray(j.likesList) &&
+          Array.isArray(j.bookmarksList)
+        ) {
+          return j;
+        }
+
         try {
           const res = await docClient.send(
             new QueryCommand({
@@ -239,8 +265,8 @@ export const getJobs: APIGatewayProxyHandler = async (event) => {
             }),
           );
           const jItems = res.Items || [];
-          j.likesList = [];
-          j.bookmarksList = [];
+          j.likesList = Array.isArray(j.likesList) ? j.likesList : [];
+          j.bookmarksList = Array.isArray(j.bookmarksList) ? j.bookmarksList : [];
           let commentsCount = 0;
           for (const i of jItems) {
             if (i.SK.startsWith("LIKE#")) {
@@ -486,6 +512,10 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
 
     const title = body.title || body.titulo || "";
     const descripcion = body.descripcion || body.description || "Sin descripción";
+
+    const { evaluatePreAi } = await import("../../utils/preAiFilter");
+    const { moderateTextWithAi } = await import("../../utils/geminiModeration");
+    const { moderateS3Media } = await import("../../utils/s3ModerationHelper");
 
     if (title) {
       const titleFilter = evaluatePreAi(title);
@@ -752,6 +782,10 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
         body: JSON.stringify({ error: "Not authorized to update this job" }),
       };
     }
+
+    const { evaluatePreAi } = await import("../../utils/preAiFilter");
+    const { moderateTextWithAi } = await import("../../utils/geminiModeration");
+    const { moderateS3Media } = await import("../../utils/s3ModerationHelper");
 
     if (body.title || body.titulo) {
       const titleFilter = evaluatePreAi(body.title || body.titulo);
@@ -1135,18 +1169,23 @@ export async function evaluateAndTriggerVacancyExpirations(vacancies: any[]): Pr
         });
 
         if (companyId) {
-          createUserNotification({
-            userId: companyId,
-            title: "Recordatorio de vigencia de vacante",
-            message: `Tu vacante "${jobTitle}" está a ${daysRemaining === 0 ? "menos de 24 horas" : `${daysRemaining} día(s)`} de cumplir su periodo de vigencia (cierre estipulado: ${formattedDate}).`,
-            type: "expiration_reminder",
-            url: "/my-vacancies",
-            extra: {
-              jobId: vacancy.id,
-              fechaCierre: expirationDateStr,
-              diasRestantes: daysRemaining,
-            },
-          }).catch((err) => console.error("Error creating vacancy expiration reminder:", err));
+          try {
+            const { createUserNotification } = await import("../../utils/webPushService");
+            await createUserNotification({
+              userId: companyId,
+              title: "Recordatorio de vigencia de vacante",
+              message: `Tu vacante "${jobTitle}" está a ${daysRemaining === 0 ? "menos de 24 horas" : `${daysRemaining} día(s)`} de cumplir su periodo de vigencia (cierre estipulado: ${formattedDate}).`,
+              type: "expiration_reminder",
+              url: "/my-vacancies",
+              extra: {
+                jobId: vacancy.id,
+                fechaCierre: expirationDateStr,
+                diasRestantes: daysRemaining,
+              },
+            });
+          } catch (err) {
+            console.error("Error creating vacancy expiration reminder:", err);
+          }
         }
 
         await docClient.send(
