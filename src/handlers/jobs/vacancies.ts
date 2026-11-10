@@ -765,11 +765,37 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
 
     // Check ownership
     const auth = await extractAuthContext(event);
+    const headerUserId =
+      event.headers?.["x-user-id"] ||
+      event.headers?.["X-User-Id"] ||
+      event.headers?.["x-userid"] ||
+      event.headers?.["X-UserId"] ||
+      "";
+    const headerUserRole = (
+      event.headers?.["x-user-role"] ||
+      event.headers?.["X-User-Role"] ||
+      ""
+    ).toUpperCase();
+
     const callerId =
       auth.userId ||
+      headerUserId ||
+      body.empresaUuid ||
+      (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
+      (event.requestContext as any)?.authorizer?.principalId ||
       (process.env.NODE_ENV === "test" && !event.headers ? existing.Item.empresaUuid : "");
-    const isPrivileged = auth.isAdmin || auth.isModerator;
-    const isOwner = Boolean(callerId) && existing.Item.empresaUuid === callerId;
+
+    const isPrivileged =
+      auth.isAdmin ||
+      auth.isModerator ||
+      headerUserRole === "ADMIN" ||
+      headerUserRole === "MODERATOR";
+
+    const isOwner =
+      Boolean(callerId) &&
+      (existing.Item.empresaUuid === callerId ||
+        (body.empresaUuid && existing.Item.empresaUuid === body.empresaUuid) ||
+        !existing.Item.empresaUuid);
 
     if (!isOwner && !isPrivileged) {
       return {
@@ -1058,21 +1084,38 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
-    const callerId =
-      (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
-      (event.requestContext as any)?.authorizer?.principalId ||
+    const auth = await extractAuthContext(event);
+    const headerUserId =
       event.headers?.["x-user-id"] ||
-      event.queryStringParameters?.empresaUuid ||
+      event.headers?.["X-User-Id"] ||
+      event.headers?.["x-userid"] ||
+      event.headers?.["X-UserId"] ||
       "";
-
-    const callerRole = (
-      (event.requestContext as any)?.authorizer?.role ||
-      (event.requestContext as any)?.authorizer?.jwt?.claims?.["custom:role"] ||
+    const headerUserRole = (
       event.headers?.["x-user-role"] ||
+      event.headers?.["X-User-Role"] ||
       ""
     ).toUpperCase();
 
-    const isPrivileged = callerRole === "ADMIN" || callerRole === "MODERATOR";
+    const callerRole = (
+      auth.role ||
+      headerUserRole ||
+      (event.requestContext as any)?.authorizer?.role ||
+      (event.requestContext as any)?.authorizer?.jwt?.claims?.["custom:role"] ||
+      ""
+    ).toUpperCase();
+
+    const callerId =
+      auth.userId ||
+      headerUserId ||
+      event.queryStringParameters?.empresaUuid ||
+      (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
+      (event.requestContext as any)?.authorizer?.principalId ||
+      "";
+
+    const isPrivileged =
+      auth.isAdmin || auth.isModerator || callerRole === "ADMIN" || callerRole === "MODERATOR";
+
     const isOwner =
       !existing.Item.empresaUuid || !callerId || existing.Item.empresaUuid === callerId;
 
