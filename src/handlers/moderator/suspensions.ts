@@ -54,7 +54,39 @@ export const initiateSuspension: APIGatewayProxyHandler = async (event) => {
     const rawGraceDays = typeof body.graceDays === "number" ? body.graceDays : 4;
     const graceDays = Math.min(Math.max(1, rawGraceDays), 30);
 
-    const res = await executeOrgSuspensionInitiation(companyId, reason, graceDays);
+    const callerRole = auth.isAdmin ? "ADMIN" : "MODERATOR";
+    const callerId = auth.userId || callerRole;
+
+    // Regla de jerarquía suprema: Si la empresa fue restituida por un Administrador Central, un Moderador no puede iniciar suspensión
+    if (auth.isModerator && !auth.isAdmin) {
+      const profileCheck = await docClient
+        .send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+          }),
+        )
+        .catch(() => ({ Item: null }));
+
+      if (profileCheck?.Item?.revokedByRole === "ADMIN") {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({
+            error:
+              "Acceso denegado: Esta organización fue restituida por un Administrador Central y no puede ser suspendida por un Moderador de Comunidad.",
+          }),
+        };
+      }
+    }
+
+    const res = await executeOrgSuspensionInitiation(
+      companyId,
+      reason,
+      graceDays,
+      callerRole,
+      callerId,
+    );
 
     return {
       statusCode: 200,
@@ -109,6 +141,42 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
     const notes = body.notes || "Apelación aprobada. Suspensión revocada.";
     const timestamp = new Date().toISOString();
 
+    const callerRole = auth.isAdmin ? "ADMIN" : "MODERATOR";
+    const callerId = auth.userId || callerRole;
+
+    // Jerarquía de Mando Suprema: Si la sanción fue iniciada o dictaminada por un Administrador Central, un Moderador no puede revocarla
+    if (auth.isModerator && !auth.isAdmin) {
+      const graceRes = await docClient
+        .send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `SUSPENSION#${companyId}`, SK: "GRACE_PERIOD" },
+          }),
+        )
+        .catch(() => ({ Item: null }));
+
+      const profileRes = await docClient
+        .send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+          }),
+        )
+        .catch(() => ({ Item: null }));
+
+      const suspendedByRole = graceRes?.Item?.initiatedByRole || profileRes?.Item?.suspendedByRole;
+      if (suspendedByRole === "ADMIN") {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({
+            error:
+              "Acceso denegado: Esta sanción fue dictaminada por un Administrador Central con autoridad jerárquica suprema y no puede ser revocada por un Moderador de Comunidad.",
+          }),
+        };
+      }
+    }
+
     // Validar regla de al menos 3 mensajes por parte de la organización en el chat
     const orgMsgCount = await getOrgAppealMessageCount(companyId);
     if (orgMsgCount < 3) {
@@ -135,12 +203,14 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
         TableName: tableName,
         Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
         UpdateExpression:
-          "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, updatedAt = :u, GSI1PK = :gsiPk, GSI1SK = :gsiSk REMOVE suspensionReason, suspensionGracePeriodEnd",
+          "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, revokedByRole = :rbr, revokedByUserId = :rbu, updatedAt = :u, GSI1PK = :gsiPk, GSI1SK = :gsiSk REMOVE suspensionReason, suspensionGracePeriodEnd",
         ExpressionAttributeValues: {
           ":st": "Activa",
           ":ec": "ACTIVO",
           ":b": false,
           ":ss": "CANCELLED",
+          ":rbr": callerRole,
+          ":rbu": callerId,
           ":u": timestamp,
           ":gsiPk": "PROFILE",
           ":gsiSk": "ROLE#EMPRESA#STATUS#ACTIVO",
@@ -244,6 +314,32 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
     const reason = body.reason || "Dictamen desfavorable tras proceso de evaluación/apelación";
     const timestamp = new Date().toISOString();
 
+    const callerRole = auth.isAdmin ? "ADMIN" : "MODERATOR";
+    const callerId = auth.userId || callerRole;
+
+    // Regla de Jerarquía: Si la organización fue restituida por un Administrador Central, un Moderador no puede suspenderla
+    if (auth.isModerator && !auth.isAdmin) {
+      const profileCheck = await docClient
+        .send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
+          }),
+        )
+        .catch(() => ({ Item: null }));
+
+      if (profileCheck?.Item?.revokedByRole === "ADMIN") {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({
+            error:
+              "Acceso denegado: Esta organización fue habilitada por un Administrador Central y no puede ser suspendida por un Moderador de Comunidad.",
+          }),
+        };
+      }
+    }
+
     // Validar regla de al menos 3 mensajes por parte de la organización en el chat (o periodo expirado / forzado por falta de respuesta)
     const orgMsgCount = await getOrgAppealMessageCount(companyId);
     if (orgMsgCount < 3 && !body.force) {
@@ -255,7 +351,7 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
           }),
         )
         .catch(() => ({ Item: null }));
-      const graceEnd = profileRes.Item?.suspensionGracePeriodEnd;
+      const graceEnd = profileRes?.Item?.suspensionGracePeriodEnd;
       const isPeriodExpired = graceEnd && new Date() >= new Date(graceEnd);
 
       if (!isPeriodExpired) {
@@ -283,13 +379,15 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
         TableName: tableName,
         Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
         UpdateExpression:
-          "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, suspensionReason = :sr, updatedAt = :u, GSI1PK = :gsiPk, GSI1SK = :gsiSk",
+          "SET estatus = :st, estadoCuenta = :ec, bloqueada = :b, suspensionStatus = :ss, suspensionReason = :sr, dictamenByRole = :dbr, dictamenByUserId = :dbu, updatedAt = :u, GSI1PK = :gsiPk, GSI1SK = :gsiSk",
         ExpressionAttributeValues: {
           ":st": "Suspendida",
           ":ec": "SUSPENDIDA",
           ":b": true,
           ":ss": "SUSPENDED",
           ":sr": reason,
+          ":dbr": callerRole,
+          ":dbu": callerId,
           ":u": timestamp,
           ":gsiPk": "PROFILE",
           ":gsiSk": "ROLE#EMPRESA#STATUS#SUSPENDIDA",
@@ -364,8 +462,8 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       targetId: companyId,
       targetType: "ORGANIZACION",
       action: "SUSPENSION_DEFINITIVA_RF7",
-      reason: `Suspensión ejecutada definitivamente: ${reason}`,
-      executorId: "MODERADOR",
+      reason: `Suspensión ejecutada definitivamente: ${reason}. Dictaminado por: ${callerRole}`,
+      executorId: callerId,
     });
 
     // 6. Broadcast WS de resolución

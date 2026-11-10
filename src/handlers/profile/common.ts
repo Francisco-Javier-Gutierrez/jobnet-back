@@ -65,6 +65,19 @@ export async function enrichPostsWithRelations(posts: any[], client: any, table:
         }
       }
 
+      const resolvedLikesCount =
+        typeof post.likesCount === "number"
+          ? Math.max(post.likesCount, likesList.length)
+          : likesList.length;
+      const resolvedBookmarksCount =
+        typeof post.bookmarksCount === "number"
+          ? Math.max(post.bookmarksCount, bookmarksList.length)
+          : bookmarksList.length;
+      const resolvedCommentsCount =
+        typeof post.commentsCount === "number"
+          ? Math.max(post.commentsCount, comments.length)
+          : comments.length;
+
       return {
         uniqueId: postUuid,
         author: post.author || "Anónimo",
@@ -77,9 +90,90 @@ export async function enrichPostsWithRelations(posts: any[], client: any, table:
         pdfName: post.pdfName || undefined,
         createdAt: post.createdAt || new Date().toISOString(),
         sharesCount: post.sharesCount || 0,
+        likesCount: resolvedLikesCount,
+        bookmarksCount: resolvedBookmarksCount,
+        commentsCount: resolvedCommentsCount,
         likesList,
         bookmarksList,
         comments,
+      };
+    }),
+  );
+}
+
+export async function enrichJobsWithRelations(jobs: any[], client: any, table: string) {
+  if (!jobs.length) return [];
+
+  return await Promise.all(
+    jobs.map(async (jobItem) => {
+      const jId = jobItem.id || (jobItem.PK ? jobItem.PK.replace("VACANCY#", "") : "");
+      const likesList: string[] = [];
+      const bookmarksList: string[] = [];
+      let commentsCount = 0;
+
+      try {
+        const result = await client.send(
+          new QueryCommand({
+            TableName: table,
+            KeyConditionExpression: "PK = :pk",
+            ExpressionAttributeValues: {
+              ":pk": `VACANCY#${jId}`,
+            },
+          }),
+        );
+
+        const items = result.Items || [];
+        for (const item of items) {
+          if (item.SK && item.SK.startsWith("LIKE#")) {
+            likesList.push(item.SK.replace("LIKE#", ""));
+          } else if (item.SK && item.SK.startsWith("BOOKMARK#")) {
+            bookmarksList.push(item.SK.replace("BOOKMARK#", ""));
+          } else if (item.SK && item.SK.startsWith("COMMENT#")) {
+            if (!item.isDeleted) {
+              commentsCount++;
+            }
+          }
+        }
+      } catch {
+        // Fallback to empty relations if query fails
+      }
+
+      const resolvedLikesCount =
+        typeof jobItem.likesCount === "number"
+          ? Math.max(jobItem.likesCount, likesList.length)
+          : likesList.length;
+      const resolvedBookmarksCount =
+        typeof jobItem.bookmarksCount === "number"
+          ? Math.max(jobItem.bookmarksCount, bookmarksList.length)
+          : bookmarksList.length;
+      const resolvedCommentsCount =
+        typeof jobItem.commentsCount === "number"
+          ? Math.max(jobItem.commentsCount, commentsCount)
+          : commentsCount;
+
+      const enriched = enrichJobItem(
+        {
+          ...jobItem,
+          id: jId,
+          likesList,
+          bookmarksList,
+          likesCount: resolvedLikesCount,
+          bookmarksCount: resolvedBookmarksCount,
+          commentsCount: resolvedCommentsCount,
+          sharesCount: jobItem.sharesCount || 0,
+        },
+        undefined,
+        new Set([jId]),
+      );
+
+      return {
+        ...enriched,
+        likesList,
+        bookmarksList,
+        likesCount: resolvedLikesCount,
+        bookmarksCount: resolvedBookmarksCount,
+        commentsCount: resolvedCommentsCount,
+        sharesCount: jobItem.sharesCount || 0,
       };
     }),
   );

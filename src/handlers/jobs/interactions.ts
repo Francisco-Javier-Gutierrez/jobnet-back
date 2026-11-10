@@ -10,6 +10,7 @@ import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { evaluatePreAi } from "../../utils/preAiFilter";
 import { parseJsonBody } from "../../utils/validator";
+import { updateAtomicCounter } from "../../utils/counterHelper";
 
 export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
   try {
@@ -62,6 +63,7 @@ export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
         }),
       );
       liked = false;
+      await updateAtomicCounter(docClient, tableName, key.PK, "likesCount", -1);
     } else {
       await docClient.send(
         new PutCommand({
@@ -73,6 +75,7 @@ export const toggleLikeJob: APIGatewayProxyHandler = async (event) => {
         }),
       );
       liked = true;
+      await updateAtomicCounter(docClient, tableName, key.PK, "likesCount", 1);
     }
 
     return {
@@ -159,6 +162,7 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
         Item: cleanItem,
       }),
     );
+    await updateAtomicCounter(docClient, tableName, cleanItem.PK, "commentsCount", 1);
 
     // Notificar a la empresa de la vacante
     try {
@@ -251,6 +255,7 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
           },
         }),
       );
+      await updateAtomicCounter(docClient, tableName, `VACANCY#${id}`, "commentsCount", -1);
 
       return {
         statusCode: 200,
@@ -286,6 +291,7 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
           },
         }),
       );
+      await updateAtomicCounter(docClient, tableName, `VACANCY#${id}`, "commentsCount", -1);
 
       return {
         statusCode: 200,
@@ -308,6 +314,7 @@ export const deleteCommentJob: APIGatewayProxyHandler = async (event) => {
           },
         }),
       );
+      await updateAtomicCounter(docClient, tableName, `VACANCY#${id}`, "commentsCount", -1);
 
       return {
         statusCode: 200,
@@ -381,6 +388,7 @@ export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
         }),
       );
       bookmarked = false;
+      await updateAtomicCounter(docClient, tableName, key.PK, "bookmarksCount", -1);
     } else {
       await docClient.send(
         new PutCommand({
@@ -394,6 +402,7 @@ export const toggleBookmarkJob: APIGatewayProxyHandler = async (event) => {
         }),
       );
       bookmarked = true;
+      await updateAtomicCounter(docClient, tableName, key.PK, "bookmarksCount", 1);
     }
 
     return {

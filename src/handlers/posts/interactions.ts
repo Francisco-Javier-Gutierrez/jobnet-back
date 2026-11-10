@@ -10,6 +10,7 @@ import { docClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { evaluatePreAi } from "../../utils/preAiFilter";
 import { parseJsonBody } from "../../utils/validator";
+import { updateAtomicCounter } from "../../utils/counterHelper";
 
 export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
   try {
@@ -65,6 +66,7 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
         }),
       );
       liked = false;
+      await updateAtomicCounter(docClient, tableName, key.PK, "likesCount", -1);
     } else {
       // Like doesn't exist, create it
       await docClient.send(
@@ -77,6 +79,7 @@ export const toggleLikePost: APIGatewayProxyHandler = async (event) => {
         }),
       );
       liked = true;
+      await updateAtomicCounter(docClient, tableName, key.PK, "likesCount", 1);
 
       // Notificar al autor del post cuando recibe like
       try {
@@ -187,6 +190,7 @@ export const addCommentPost: APIGatewayProxyHandler = async (event) => {
         Item: cleanItem,
       }),
     );
+    await updateAtomicCounter(docClient, tableName, cleanItem.PK, "commentsCount", 1);
 
     // Notificar al autor de la publicación si no es él mismo
     try {
@@ -319,6 +323,7 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
           },
         }),
       );
+      await updateAtomicCounter(docClient, tableName, `POST#${postId}`, "commentsCount", -1);
 
       return {
         statusCode: 200,
@@ -342,6 +347,7 @@ export const deleteCommentPost: APIGatewayProxyHandler = async (event) => {
           },
         }),
       );
+      await updateAtomicCounter(docClient, tableName, `POST#${postId}`, "commentsCount", -1);
 
       return {
         statusCode: 200,
@@ -415,6 +421,7 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
         }),
       );
       bookmarked = false;
+      await updateAtomicCounter(docClient, tableName, key.PK, "bookmarksCount", -1);
     } else {
       await docClient.send(
         new PutCommand({
@@ -428,6 +435,7 @@ export const toggleBookmarkPost: APIGatewayProxyHandler = async (event) => {
         }),
       );
       bookmarked = true;
+      await updateAtomicCounter(docClient, tableName, key.PK, "bookmarksCount", 1);
     }
 
     return {

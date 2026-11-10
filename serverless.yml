@@ -583,4 +583,23 @@ functions:
       - httpApi:
           path: /admin/analytics
           method: get
+  getTermsVersion:
+    handler: src/handlers/admin/index.getTermsVersion
+    events:
+      - httpApi:
+          path: /terms/version
+          method: get
+  getTermsHistory:
+    handler: src/handlers/admin/index.getTermsHistory
+    events:
+      - httpApi:
+          path: /admin/terms/history
+          method: get
+  updateTermsAndBroadcast:
+    handler: src/handlers/admin/index.updateTermsAndBroadcast
+    events:
+      - httpApi:
+          path: /admin/terms/update
+          method: post
+
 

@@ -462,13 +462,13 @@ export const getPushSubscribers: APIGatewayProxyHandler = async (event) => {
   try {
     const isTest = process.env.NODE_ENV === "test";
     const auth = await extractAuthContext(event);
-    const isPrivileged = auth.isAdmin || auth.isModerator || (isTest && !event.headers);
-    if (!isPrivileged) {
+    const isAdmin = auth.isAdmin || (isTest && !event.headers);
+    if (!isAdmin) {
       return {
         statusCode: 403,
         headers,
         body: JSON.stringify({
-          error: "Acceso denegado: Panel exclusivo para Administradores y Moderadores.",
+          error: "Acceso denegado: Panel exclusivo para Administradores.",
         }),
       };
     }

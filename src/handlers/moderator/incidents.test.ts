@@ -470,6 +470,7 @@ describe("moderator incidents handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident (line 376)
       mockDynamoSend.mockResolvedValueOnce({}); // Put grace period (line 533)
       mockDynamoSend.mockResolvedValueOnce({}); // Update vacancy (line 546)
+      mockDynamoSend.mockResolvedValueOnce({}); // saveAuditLog
       mockDynamoSend.mockResolvedValueOnce({
         Item: { empresaUuid: "comp-1", titulo: "Senior Dev" },
       }); // Get vacancy (line 562)
@@ -565,6 +566,7 @@ describe("moderator incidents handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident
       mockDynamoSend.mockResolvedValueOnce({}); // Delete grace period
       mockDynamoSend.mockResolvedValueOnce({}); // Update vacancy
+      mockDynamoSend.mockResolvedValueOnce({}); // saveAuditLog
       mockDynamoSend.mockResolvedValueOnce({}); // Put notification
       mockDynamoSend.mockResolvedValueOnce({
         Item: { empresaUuid: "comp-1" },
@@ -597,6 +599,7 @@ describe("moderator incidents handlers", () => {
       mockDynamoSend.mockResolvedValueOnce({}); // Update incident
       mockDynamoSend.mockResolvedValueOnce({}); // Delete grace period
       mockDynamoSend.mockResolvedValueOnce({}); // Update vacancy
+      mockDynamoSend.mockResolvedValueOnce({}); // saveAuditLog
       mockDynamoSend.mockResolvedValueOnce({}); // Put notification
       mockDynamoSend.mockRejectedValueOnce(new Error("Vacancy get failure for domain block")); // Line 508
       mockDynamoSend.mockResolvedValueOnce({}); // Update profile chat

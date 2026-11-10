@@ -47,6 +47,9 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
           pdfName: item.pdfName || undefined,
           createdAt: item.createdAt || new Date().toISOString(),
           sharesCount: item.sharesCount || 0,
+          likesCount: typeof item.likesCount === "number" ? item.likesCount : undefined,
+          bookmarksCount: typeof item.bookmarksCount === "number" ? item.bookmarksCount : undefined,
+          commentsCount: typeof item.commentsCount === "number" ? item.commentsCount : undefined,
           likesList: [],
           bookmarksList: [],
           comments: [],
@@ -79,6 +82,21 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
         }
       }
     }
+
+    Object.values(postsMap).forEach((post: any) => {
+      post.likesCount =
+        typeof post.likesCount === "number"
+          ? Math.max(post.likesCount, post.likesList.length)
+          : post.likesList.length;
+      post.bookmarksCount =
+        typeof post.bookmarksCount === "number"
+          ? Math.max(post.bookmarksCount, post.bookmarksList.length)
+          : post.bookmarksList.length;
+      post.commentsCount =
+        typeof post.commentsCount === "number"
+          ? Math.max(post.commentsCount, post.comments.length)
+          : post.comments.length;
+    });
 
     // Third pass: enrich missing authorAvatar by querying user profiles in DynamoDB
     const authorUuids = Array.from(
@@ -262,6 +280,9 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
       pdfName: pdfName || null,
       createdAt,
       sharesCount: 0,
+      likesCount: 0,
+      bookmarksCount: 0,
+      commentsCount: 0,
       GSI1PK: `POSTS#${authorUuid || "anonymous"}`,
       GSI1SK: `POST#${postUuid}`,
     };

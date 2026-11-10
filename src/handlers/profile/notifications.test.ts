@@ -178,6 +178,16 @@ describe("profile notifications handlers", () => {
       expect(res.statusCode).toBe(403);
     });
 
+    it("getPushSubscribers should return 403 for moderators as panel is 100% admin exclusive", async () => {
+      const res = await getPushSubscribers(
+        { headers: { "x-user-role": "MODERATOR" } } as any,
+        {} as any,
+        () => {},
+      );
+      expect(res.statusCode).toBe(403);
+      expect(JSON.parse(res.body).error).toContain("exclusivo para Administradores");
+    });
+
     it("sendCustomPushNotification should return 403 for non-admins", async () => {
       const res = await sendCustomPushNotification(
         {

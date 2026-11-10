@@ -1,6 +1,12 @@
 import { APIGatewayProxyHandler } from "aws-lambda";
 import { QueryCommand, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
-import { docClient, tableName, headers, enrichJobItem, enrichPostsWithRelations } from "./common";
+import {
+  docClient,
+  tableName,
+  headers,
+  enrichPostsWithRelations,
+  enrichJobsWithRelations,
+} from "./common";
 
 export const getProfileVacancies: APIGatewayProxyHandler = async (event) => {
   try {
@@ -41,25 +47,7 @@ export const getProfileVacancies: APIGatewayProxyHandler = async (event) => {
     const total = userVacancies.length;
     const totalPages = Math.ceil(total / limit);
     const paginated = userVacancies.slice((page - 1) * limit, page * limit);
-    const enriched = paginated.map((v) =>
-      enrichJobItem({
-        id: v.PK.replace("VACANCY#", ""),
-        title: v.titulo || v.title,
-        company: v.company || "Empresa",
-        empresaUuid: v.empresaUuid || "",
-        lat: v.ubicacion?.lat || v.lat || 0,
-        lng: v.ubicacion?.lng || v.lng || 0,
-        modalidad: v.modalidad || "Presencial",
-        salario: v.salario || 0,
-        habilidadesRequeridas: v.habilidadesRequeridas || [],
-        sectores: v.sectores || [],
-        descripcion: v.descripcion || "Sin descripción",
-        pdfUrl: v.pdfUrl || "",
-        estado: v.estado || "Activa",
-        createdAt: v.fechaCreacion || v.createdAt,
-        sharesCount: v.sharesCount || 0,
-      }),
-    );
+    const enriched = await enrichJobsWithRelations(paginated, docClient, tableName);
 
     return {
       statusCode: 200,
@@ -261,11 +249,8 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
     const enrichedPosts =
       rawPosts.length > 0 ? await enrichPostsWithRelations(rawPosts, docClient, tableName) : [];
 
-    const enrichedJobs = rawJobs.map((jobItem) => {
-      const jId = jobItem.id || jobItem.PK.replace("VACANCY#", "");
-      const enriched = enrichJobItem(jobItem, undefined, new Set([jId]));
-      return enriched;
-    });
+    const enrichedJobs =
+      rawJobs.length > 0 ? await enrichJobsWithRelations(rawJobs, docClient, tableName) : [];
 
     const enrichedMap = new Map<string, any>();
     for (const p of enrichedPosts) {

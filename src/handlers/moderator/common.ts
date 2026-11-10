@@ -222,6 +222,8 @@ export async function executeOrgSuspensionInitiation(
   companyId: string,
   reason: string,
   graceDays: number = 4,
+  callerRole: string = "MODERATOR",
+  callerId?: string,
 ) {
   const now = new Date();
   const gracePeriodEnd = new Date(now.getTime() + graceDays * 24 * 60 * 60 * 1000).toISOString();
@@ -234,11 +236,13 @@ export async function executeOrgSuspensionInitiation(
       TableName: tableName,
       Key: { PK: `USER#${companyId}`, SK: "PROFILE" },
       UpdateExpression:
-        "SET estatus = :st, estadoCuenta = :ec, suspensionReason = :sr, suspensionGracePeriodEnd = :spe, suspensionStatus = :ss, updatedAt = :u, GSI1PK = :gsiPk, GSI1SK = :gsiSk",
+        "SET estatus = :st, estadoCuenta = :ec, suspensionReason = :sr, suspensionGracePeriodEnd = :spe, suspensionStatus = :ss, suspendedByRole = :sbr, suspendedByUserId = :sbu, updatedAt = :u, GSI1PK = :gsiPk, GSI1SK = :gsiSk",
       ExpressionAttributeValues: {
         ":st": "En revisión",
         ":ec": "REVISION",
         ":sr": reason,
+        ":sbr": callerRole,
+        ":sbu": callerId || callerRole,
         ":gsiPk": "PROFILE",
         ":gsiSk": "ROLE#EMPRESA#STATUS#REVISION",
         ":spe": gracePeriodEnd,
@@ -258,6 +262,8 @@ export async function executeOrgSuspensionInitiation(
         companyId,
         reason,
         status: "IN_REVIEW",
+        initiatedByRole: callerRole,
+        initiatedByUserId: callerId || callerRole,
         createdAt: timestamp,
         gracePeriodEnd,
         ttl: ttlSeconds,
@@ -329,8 +335,8 @@ export async function executeOrgSuspensionInitiation(
     targetId: companyId,
     targetType: "ORGANIZACION",
     action: "INICIO_PROCESO_SUSPENSION",
-    reason: `Motivo: ${reason}. Días de gracia: ${graceDays}. Expiración: ${gracePeriodEnd}`,
-    executorId: "ADMIN",
+    reason: `Motivo: ${reason}. Días de gracia: ${graceDays}. Expiración: ${gracePeriodEnd}. Iniciado por: ${callerRole}`,
+    executorId: callerId || callerRole,
   });
 
   return { gracePeriodEnd, timestamp };
