@@ -153,7 +153,7 @@ functions:
           authorizer:
             name: cognitoJwt
   sendNotificationEmail:
-    handler: src/handlers/jobs.sendNotificationEmail
+    handler: src/handlers/jobs/uploads.sendNotificationEmail
     events:
       - httpApi:
           path: /notify
@@ -471,13 +471,13 @@ functions:
           path: /catalog/{id}
           method: delete
   updateJob:
-    handler: src/handlers/jobs.updateJob
+    handler: src/handlers/jobs/vacancies.updateJob
     events:
       - httpApi:
           path: /jobs/{id}
           method: put
   deleteJob:
-    handler: src/handlers/jobs.deleteJob
+    handler: src/handlers/jobs/vacancies.deleteJob
     events:
       - httpApi:
           path: /jobs/{id}
