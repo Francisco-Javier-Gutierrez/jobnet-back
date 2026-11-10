@@ -48,6 +48,7 @@ Políticas estrictas:
 2. DISCURSO DE ODIO: Prohibido cualquier ataque o degradación por raza, origen, orientación sexual, religión o discapacidad.
 3. ESTAFAS LABORALES: Prohibido ofertas que requieran inversión previa, depósitos para uniformes/exámenes o esquemas piramidales/cripto.
 4. ACOSO Y VIOLENCIA: Prohibido hostigamiento o amenazas personales.
+5. CONTENIDO SEXUAL O EXPLÍCITO (NSFW): Prohibido terminantemente contenido sexualmente explícito, pornografía, menciones directas a actos sexuales (ej. sexo anal, sexo oral), prostitución, escorts o servicios para adultos en esta plataforma profesional.
 
 Texto a analizar:
 """${text}"""
@@ -90,7 +91,18 @@ Responde ÚNICAMENTE con un objeto JSON con este esquema exacto:
     }
 
     const data = (await response.json()) as any;
-    const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidate = data?.candidates?.[0];
+    if (candidate?.finishReason === "SAFETY" || data?.promptFeedback?.blockReason) {
+      return {
+        safe: false,
+        confidence: 0.99,
+        flaggedCategories: ["NSFW", "SEXUAL_CONTENT"],
+        reason:
+          "El contenido infringe las políticas comunitarias de JobNet sobre contenido para adultos y lenguaje inapropiado.",
+      };
+    }
+
+    const rawContent = candidate?.content?.parts?.[0]?.text;
     if (!rawContent) {
       return {
         safe: true,
@@ -184,7 +196,17 @@ Responde ÚNICAMENTE con este JSON:
     }
 
     const data = (await response.json()) as any;
-    const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidate = data?.candidates?.[0];
+    if (candidate?.finishReason === "SAFETY" || data?.promptFeedback?.blockReason) {
+      return {
+        safe: false,
+        confidence: 0.99,
+        flaggedCategories: ["NSFW", "SAFETY_VIOLATION"],
+        reason: "La imagen ha sido bloqueada automáticamente por los filtros de seguridad de IA.",
+      };
+    }
+
+    const rawContent = candidate?.content?.parts?.[0]?.text;
     if (!rawContent) {
       return {
         safe: true,
@@ -286,7 +308,17 @@ Responde ÚNICAMENTE con este JSON:
     }
 
     const data = (await response.json()) as any;
-    const rawContent = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidate = data?.candidates?.[0];
+    if (candidate?.finishReason === "SAFETY" || data?.promptFeedback?.blockReason) {
+      return {
+        safe: false,
+        confidence: 0.99,
+        flaggedCategories: ["NSFW", "SAFETY_VIOLATION"],
+        reason: "La imagen ha sido bloqueada automáticamente por los filtros de seguridad de IA.",
+      };
+    }
+
+    const rawContent = candidate?.content?.parts?.[0]?.text;
     if (!rawContent) {
       return {
         safe: true,

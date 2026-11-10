@@ -184,6 +184,34 @@ export const SCAM_PATTERNS_LIST = [
   "deposite para asegurar su puesto",
 ];
 
+export const SEXUAL_CONTENT_LIST = [
+  "sexo anal",
+  "sexo oral",
+  "sexo casual",
+  "servicios sexuales",
+  "anal",
+  "pornografia",
+  "porno",
+  "coito",
+  "felacion",
+  "prostitucion",
+  "prostituta",
+  "prostituto",
+  "escort",
+  "scort",
+  "nopor",
+  "pack de fotos",
+  "fotos intimas",
+  "masturbacion",
+  "pene",
+  "vagina",
+  "follar",
+  "blowjob",
+  "handjob",
+  "cumshot",
+  "hardcore porn",
+];
+
 export const PROFANITY_CATEGORIES: BlacklistCategory[] = [
   {
     id: "ACRONYMS",
@@ -214,5 +242,11 @@ export const PROFANITY_CATEGORIES: BlacklistCategory[] = [
     name: "Patrones de Fraude y Estafas Laborales",
     severity: "CRITICA",
     terms: SCAM_PATTERNS_LIST,
+  },
+  {
+    id: "SEXUAL_CONTENT",
+    name: "Contenido Sexual y Adulto Inapropiado",
+    severity: "CRITICA",
+    terms: SEXUAL_CONTENT_LIST,
   },
 ];
