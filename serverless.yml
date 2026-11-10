@@ -3,6 +3,7 @@ service: jobnet-back
 provider:
   name: aws
   runtime: nodejs20.x
+  architecture: arm64
   stage: ${opt:stage, 'prod'}
   region: us-east-1
   profile: ${opt:aws-profile, env:AWS_PROFILE, 'terra-profile'}
@@ -111,25 +112,25 @@ functions:
           trigger: PostConfirmation
           existing: true
   getJobs:
-    handler: src/handlers/jobs.getJobs
+    handler: src/handlers/jobs/vacancies.getJobs
     events:
       - httpApi:
           path: /jobs
           method: get
   getJobById:
-    handler: src/handlers/jobs.getJobById
+    handler: src/handlers/jobs/vacancies.getJobById
     events:
       - httpApi:
           path: /jobs/{id}
           method: get
   createJob:
-    handler: src/handlers/jobs.createJob
+    handler: src/handlers/jobs/vacancies.createJob
     events:
       - httpApi:
           path: /jobs
           method: post
   checkVacancyExpirations:
-    handler: src/handlers/jobs.checkVacancyExpirations
+    handler: src/handlers/jobs/vacancies.checkVacancyExpirations
     events:
       - httpApi:
           path: /jobs/check-expirations
@@ -138,13 +139,13 @@ functions:
           path: /jobs/check-expirations
           method: get
   getUploadPresignedUrl:
-    handler: src/handlers/jobs.getUploadPresignedUrl
+    handler: src/handlers/jobs/uploads.getUploadPresignedUrl
     events:
       - httpApi:
           path: /upload-url
           method: get
   getViewPresignedUrl:
-    handler: src/handlers/jobs.getViewPresignedUrl
+    handler: src/handlers/jobs/uploads.getViewPresignedUrl
     events:
       - httpApi:
           path: /view-url
@@ -506,73 +507,73 @@ functions:
           path: /applications/{jobId}/{candidateId}/status
           method: put
   getPosts:
-    handler: src/handlers/posts.getPosts
+    handler: src/handlers/posts/postsCrud.getPosts
     events:
       - httpApi:
           path: /posts
           method: get
   createPost:
-    handler: src/handlers/posts.createPost
+    handler: src/handlers/posts/postsCrud.createPost
     events:
       - httpApi:
           path: /posts
           method: post
   toggleLikePost:
-    handler: src/handlers/posts.toggleLikePost
+    handler: src/handlers/posts/interactions.toggleLikePost
     events:
       - httpApi:
           path: /posts/{id}/like
           method: post
   addCommentPost:
-    handler: src/handlers/posts.addCommentPost
+    handler: src/handlers/posts/interactions.addCommentPost
     events:
       - httpApi:
           path: /posts/{id}/comment
           method: post
   deleteCommentPost:
-    handler: src/handlers/posts.deleteCommentPost
+    handler: src/handlers/posts/interactions.deleteCommentPost
     events:
       - httpApi:
           path: /posts/{id}/comment/{commentId}
           method: delete
   toggleBookmarkPost:
-    handler: src/handlers/posts.toggleBookmarkPost
+    handler: src/handlers/posts/interactions.toggleBookmarkPost
     events:
       - httpApi:
           path: /posts/{id}/bookmark
           method: post
   sharePost:
-    handler: src/handlers/posts.sharePost
+    handler: src/handlers/posts/postsCrud.sharePost
     events:
       - httpApi:
           path: /posts/{id}/share
           method: post
   toggleLikeJob:
-    handler: src/handlers/jobs.toggleLikeJob
+    handler: src/handlers/jobs/interactions.toggleLikeJob
     events:
       - httpApi:
           path: /jobs/{id}/like
           method: post
   addCommentJob:
-    handler: src/handlers/jobs.addCommentJob
+    handler: src/handlers/jobs/interactions.addCommentJob
     events:
       - httpApi:
           path: /jobs/{id}/comment
           method: post
   deleteCommentJob:
-    handler: src/handlers/jobs.deleteCommentJob
+    handler: src/handlers/jobs/interactions.deleteCommentJob
     events:
       - httpApi:
           path: /jobs/{id}/comment/{commentId}
           method: delete
   toggleBookmarkJob:
-    handler: src/handlers/jobs.toggleBookmarkJob
+    handler: src/handlers/jobs/interactions.toggleBookmarkJob
     events:
       - httpApi:
           path: /jobs/{id}/bookmark
           method: post
   shareJob:
-    handler: src/handlers/jobs.shareJob
+    handler: src/handlers/jobs/interactions.shareJob
     events:
       - httpApi:
           path: /jobs/{id}/share

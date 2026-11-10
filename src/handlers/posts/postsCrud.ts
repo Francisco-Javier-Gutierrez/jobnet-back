@@ -2,9 +2,6 @@ import { APIGatewayProxyHandler } from "aws-lambda";
 import { ScanCommand, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { docClient, tableName, headers } from "./common";
-import { evaluatePreAi } from "../../utils/preAiFilter";
-import { moderateTextWithAi } from "../../utils/geminiModeration";
-import { moderateS3Media } from "../../utils/s3ModerationHelper";
 import { parseJsonBody } from "../../utils/validator";
 import { extractAuthContext } from "../../utils/authHelper";
 
@@ -102,6 +99,7 @@ export const getPosts: APIGatewayProxyHandler = async (event) => {
     const authorUuids = Array.from(
       new Set(
         Object.values(postsMap)
+          .filter((p: any) => !p.authorAvatar && !p.fotoPerfil)
           .map((p: any) => p.authorUuid)
           .filter((id) => id && id !== "anonymous"),
       ),
@@ -203,6 +201,10 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
         }),
       };
     }
+
+    const { evaluatePreAi } = await import("../../utils/preAiFilter");
+    const { moderateTextWithAi } = await import("../../utils/geminiModeration");
+    const { moderateS3Media } = await import("../../utils/s3ModerationHelper");
 
     if (content) {
       const filterResult = evaluatePreAi(content);
