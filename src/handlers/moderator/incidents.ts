@@ -63,11 +63,17 @@ export const getIncidents: APIGatewayProxyHandler = async () => {
         postTitle: item.postTitle || "",
         companyId: item.companyId || "",
         companyName: item.companyName || "",
+        candidateId: item.candidateId || "",
+        candidateName: item.candidateName || "",
+        reporterId: item.reporterId || "",
         reporter: item.reporter || "Anónimo",
         reason: item.reason || "",
         severity: item.severity || "media",
         infraccion: item.infraccion || "otro",
         estatus: item.estatus || "PENDIENTE",
+        auditState: item.auditState || undefined,
+        auditOpenedAt: item.auditOpenedAt || undefined,
+        auditOpenedBy: item.auditOpenedBy || undefined,
         fechaCreacion: item.fechaCreacion || "",
       }))
       .sort((a, b) => b.fechaCreacion.localeCompare(a.fechaCreacion));
@@ -92,6 +98,7 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     if (!parseResult.success) {
       return parseResult.response;
     }
+    const auth = await extractAuthContext(event);
     const body = parseResult.data;
     const {
       jobId,
@@ -100,6 +107,9 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
       postTitle,
       companyId,
       companyName,
+      candidateId,
+      candidateName,
+      reporterId,
       targetType,
       targetId,
       targetTitle,
@@ -130,6 +140,10 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     const uuid = Math.random().toString(36).substring(2, 15);
     const createdAt = new Date().toISOString();
 
+    const isCandidate =
+      (auth.role || "").toUpperCase() === "CANDIDATO" ||
+      (auth.role || "").toUpperCase() === "CANDIDATE";
+
     const incidentItem = {
       PK: `INCIDENT#${uuid}`,
       SK: "METADATA",
@@ -146,7 +160,10 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
       companyName:
         companyName ||
         (targetType === "ORGANIZACION" || targetType === "EMPRESA" ? targetTitle : ""),
-      reporter: reporter || "Anónimo",
+      candidateId: candidateId || (isCandidate ? auth.userId : ""),
+      candidateName: candidateName || "",
+      reporterId: reporterId || auth.userId || "",
+      reporter: reporter || auth.email || "Anónimo",
       reason,
       severity: severity || "media",
       infraccion: infraccion || "otro",
