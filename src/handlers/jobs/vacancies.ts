@@ -507,6 +507,9 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       return valResult.response;
     }
 
+    const auth = await extractAuthContext(event);
+    const callerId = auth.userId;
+
     const vacancyUuid = randomUUID();
     const now = new Date().toISOString();
 
@@ -624,7 +627,13 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
       GSI1PK: "VACANCIES",
       GSI1SK: now,
       empresaUuid:
-        body.empresaUuid || (event.requestContext as any)?.authorizer?.jwt?.claims?.sub || "",
+        body.empresaUuid ||
+        body.companyId ||
+        body.empresaId ||
+        body.userId ||
+        callerId ||
+        (event.requestContext as any)?.authorizer?.jwt?.claims?.sub ||
+        "",
       titulo: title,
       title: title,
       company: body.company || "Empresa",

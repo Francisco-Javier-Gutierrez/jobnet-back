@@ -89,7 +89,19 @@ export const updateProfile: APIGatewayProxyHandler = async (event) => {
     const auth = await extractAuthContext(event);
     const callerId = auth.userId;
     const isPrivileged = auth.isAdmin || auth.isModerator;
-    const isOwner = Boolean(callerId) && callerId === id;
+    const isOwner =
+      Boolean(callerId) &&
+      (callerId.toLowerCase() === id.toLowerCase() ||
+        (existing.Item?.usuarioUuid &&
+          callerId.toLowerCase() === String(existing.Item.usuarioUuid).toLowerCase()) ||
+        (existing.Item?.id && callerId.toLowerCase() === String(existing.Item.id).toLowerCase()) ||
+        (auth.email &&
+          existing.Item?.email &&
+          auth.email.toLowerCase() === String(existing.Item.email).toLowerCase()) ||
+        (auth.email &&
+          existing.Item?.correo &&
+          auth.email.toLowerCase() === String(existing.Item.correo).toLowerCase()) ||
+        (auth.email && auth.email.toLowerCase() === id.toLowerCase()));
 
     if (!isOwner && !isPrivileged) {
       return {

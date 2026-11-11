@@ -53,16 +53,30 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
+    const targetJobId = jobId.startsWith("VACANCY#") ? jobId.replace(/^VACANCY#/i, "") : jobId;
+    const cleanJobId = jobId.replace(/^(VACANCY#|JOB#)/i, "");
+
     // Verify vacancy maxPostulantes limit
-    const jobResult = await docClient.send(
+    let jobResult = await docClient.send(
       new GetCommand({
         TableName: tableName,
         Key: {
-          PK: `VACANCY#${jobId}`,
+          PK: `VACANCY#${cleanJobId}`,
           SK: "METADATA",
         },
       }),
     );
+    if (!jobResult.Item) {
+      jobResult = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: {
+            PK: `JOB#${cleanJobId}`,
+            SK: "METADATA",
+          },
+        }),
+      );
+    }
 
     if (jobResult.Item) {
       if (jobResult.Item.estado === "CERRADA") {
@@ -220,30 +234,27 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
     );
 
     // Disparar Notificaciones Push y almacenar en DynamoDB
-    const targetCompanyId = jobResult.Item?.empresaUuid || jobResult.Item?.companyId;
+    const rawCompanyId =
+      jobResult.Item?.empresaUuid ||
+      jobResult.Item?.companyId ||
+      jobResult.Item?.empresaId ||
+      jobResult.Item?.userId ||
+      jobResult.Item?.usuarioUuid ||
+      jobResult.Item?.createdBy;
+    const targetCompanyId = rawCompanyId ? String(rawCompanyId).replace(/^USER#/i, "") : "";
     const jobTitle = jobResult.Item?.titulo || jobResult.Item?.title || "tu vacante";
 
-    if (targetCompanyId) {
-      createUserNotification({
-        userId: targetCompanyId,
-        title: "Nueva postulación recibida 📄",
-        message: `Un candidato se ha postulado a tu vacante "${jobTitle}".`,
-        type: "application",
-        url: "/vacancies",
-        extra: { jobId, candidateId },
-      }).catch((err) => console.error("Error creating employer notification:", err));
-    }
-
+    // Notificación de confirmación al candidato (siempre)
     createUserNotification({
       userId: candidateId,
       title: "¡Postulación enviada! 🎯",
       message: `Te has postulado con éxito a "${jobTitle}". Te avisaremos de cualquier actualización.`,
       type: "application",
       url: "/candidate/my-applications",
-      extra: { jobId },
+      extra: { jobId: targetJobId },
     }).catch((err) => console.error("Error creating candidate notification:", err));
 
-    // Consulta de conteo para Alerta de Alta Demanda (exactamente a los 50 postulantes)
+    // Consulta de conteo para notificaciones agrupadas a la organización y alerta de alta demanda
     try {
       const countRes = await docClient.send(
         new QueryCommand({
@@ -256,7 +267,34 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
           Select: "COUNT",
         }),
       );
-      const totalApplicants = countRes.Count ?? (countRes.Items || []).length;
+      const queryCount = countRes.Count ?? (countRes.Items ? countRes.Items.length : undefined);
+      const totalApplicants = queryCount !== undefined ? queryCount : 1;
+
+      // Restricción de notificaciones a la organización:
+      // Se notifica en la 1ra postulación ("Nueva postulación recibida 📄")
+      // y posteriormente cada 5 postulaciones acumuladas (5, 10, 15, 20...)
+      // para evitar saturar a las empresas ante múltiples candidatos.
+      if (targetCompanyId) {
+        if (totalApplicants === 1) {
+          createUserNotification({
+            userId: targetCompanyId,
+            title: "Nueva postulación recibida 📄",
+            message: `Un candidato se ha postulado a tu vacante "${jobTitle}".`,
+            type: "application",
+            url: "/vacancies",
+            extra: { jobId: targetJobId, candidateId, totalApplicants: 1 },
+          }).catch((err) => console.error("Error creating employer notification:", err));
+        } else if (totalApplicants > 1 && totalApplicants % 5 === 0) {
+          createUserNotification({
+            userId: targetCompanyId,
+            title: "Nuevas postulaciones recibidas 📄",
+            message: `Tu vacante "${jobTitle}" ha alcanzado ${totalApplicants} postulaciones acumuladas.`,
+            type: "application",
+            url: "/vacancies",
+            extra: { jobId: targetJobId, totalApplicants },
+          }).catch((err) => console.error("Error creating batched employer notification:", err));
+        }
+      }
 
       if (totalApplicants === 50 && !jobResult.Item?.alertaAltaDemandaEnviada && targetCompanyId) {
         // 1. Notificación push en la plataforma
