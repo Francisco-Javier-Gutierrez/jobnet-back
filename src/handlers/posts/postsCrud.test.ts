@@ -30,6 +30,24 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
+vi.mock("../../utils/geminiModeration", () => ({
+  moderateTextWithAi: vi.fn().mockResolvedValue({
+    safe: true,
+    confidence: 1.0,
+    flaggedCategories: [],
+    reason: null,
+  }),
+}));
+
+vi.mock("../../utils/s3ModerationHelper", () => ({
+  moderateS3Media: vi.fn().mockResolvedValue({
+    safe: true,
+    confidence: 1.0,
+    flaggedCategories: [],
+    reason: null,
+  }),
+}));
+
 import { getPosts, createPost, sharePost } from "./postsCrud";
 
 describe("posts CRUD handlers", () => {
