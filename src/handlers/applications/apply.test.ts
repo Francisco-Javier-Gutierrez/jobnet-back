@@ -314,6 +314,134 @@ describe("applications apply handler", () => {
     expect(mockSESSend).not.toHaveBeenCalled();
   });
 
+  it("should notify employer on first applicant (count === 1) and notify candidate", async () => {
+    mockDynamoSend.mockResolvedValueOnce({
+      Item: {
+        estado: "Activa",
+        titulo: "Frontend Architect",
+        empresaUuid: "company-alpha",
+      },
+    });
+    mockDynamoSend.mockResolvedValueOnce({}); // Put employer view
+    mockDynamoSend.mockResolvedValueOnce({}); // Put candidate view
+    mockDynamoSend.mockResolvedValueOnce({}); // Put chat message
+    mockDynamoSend.mockResolvedValueOnce({
+      Count: 1,
+      Items: [{ candidateId: "cand-1" }],
+    }); // Query applicants count = 1
+
+    const { createUserNotification } = await import("../../utils/webPushService");
+
+    const res = await applyToJob(
+      {
+        pathParameters: { id: "job-1" },
+        body: JSON.stringify({ candidateId: "cand-1" }),
+      } as any,
+      {} as any,
+      () => {},
+    );
+
+    expect(res.statusCode).toBe(201);
+    // Verified employer notification on 1st applicant
+    expect(createUserNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "company-alpha",
+        title: "Nueva postulación recibida 📄",
+        message: expect.stringContaining("Frontend Architect"),
+      }),
+    );
+    // Verified candidate notification
+    expect(createUserNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "cand-1",
+        title: "¡Postulación enviada! 🎯",
+      }),
+    );
+  });
+
+  it("should NOT notify employer on 2nd, 3rd, or 4th applicant to prevent notification flood", async () => {
+    mockDynamoSend.mockResolvedValueOnce({
+      Item: {
+        estado: "Activa",
+        titulo: "Frontend Architect",
+        empresaUuid: "company-alpha",
+      },
+    });
+    mockDynamoSend.mockResolvedValueOnce({}); // Put employer view
+    mockDynamoSend.mockResolvedValueOnce({}); // Put candidate view
+    mockDynamoSend.mockResolvedValueOnce({}); // Put chat message
+    mockDynamoSend.mockResolvedValueOnce({
+      Count: 3,
+      Items: [{ candidateId: "c1" }, { candidateId: "c2" }, { candidateId: "c3" }],
+    }); // Query applicants count = 3
+
+    const { createUserNotification } = await import("../../utils/webPushService");
+    vi.mocked(createUserNotification).mockClear();
+
+    const res = await applyToJob(
+      {
+        pathParameters: { id: "job-1" },
+        body: JSON.stringify({ candidateId: "cand-3" }),
+      } as any,
+      {} as any,
+      () => {},
+    );
+
+    expect(res.statusCode).toBe(201);
+    // Employer should NOT have received a notification for 3rd applicant
+    expect(createUserNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "company-alpha",
+      }),
+    );
+    // Candidate still gets their notification
+    expect(createUserNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "cand-3",
+        title: "¡Postulación enviada! 🎯",
+      }),
+    );
+  });
+
+  it("should notify employer with batched notification at every 5th applicant milestone (count === 5)", async () => {
+    mockDynamoSend.mockResolvedValueOnce({
+      Item: {
+        estado: "Activa",
+        titulo: "Frontend Architect",
+        empresaUuid: "company-alpha",
+      },
+    });
+    mockDynamoSend.mockResolvedValueOnce({}); // Put employer view
+    mockDynamoSend.mockResolvedValueOnce({}); // Put candidate view
+    mockDynamoSend.mockResolvedValueOnce({}); // Put chat message
+    mockDynamoSend.mockResolvedValueOnce({
+      Count: 5,
+      Items: new Array(5).fill({ candidateId: "c" }),
+    }); // Query applicants count = 5
+
+    const { createUserNotification } = await import("../../utils/webPushService");
+    vi.mocked(createUserNotification).mockClear();
+
+    const res = await applyToJob(
+      {
+        pathParameters: { id: "job-1" },
+        body: JSON.stringify({ candidateId: "cand-5" }),
+      } as any,
+      {} as any,
+      () => {},
+    );
+
+    expect(res.statusCode).toBe(201);
+    // Employer received batched milestone notification
+    expect(createUserNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "company-alpha",
+        title: "Nuevas postulaciones recibidas 📄",
+        message: expect.stringContaining("5 postulaciones acumuladas"),
+      }),
+    );
+  });
+
   it("should return 500 on unexpected database error", async () => {
     mockDynamoSend.mockRejectedValueOnce(new Error("Apply error"));
 

@@ -128,6 +128,63 @@ describe("user profile handlers", () => {
       expect(res.statusCode).toBe(403);
     });
 
+    it("should allow update if caller email matches profile email even if callerId differs", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          PK: "USER#u-1",
+          SK: "PROFILE",
+          email: "candidate@jobnet.com",
+          tipoUsuario: "CANDIDATO",
+        },
+      });
+      mockDynamoSend.mockResolvedValueOnce({});
+
+      const event = {
+        pathParameters: { id: "u-1" },
+        headers: {
+          "x-user-id": "cognito-sub-uuid-999",
+          "x-user-email": "candidate@jobnet.com",
+          "x-user-role": "CANDIDATO",
+        },
+        body: JSON.stringify({
+          nombre: "Alice Candidate",
+        }),
+      } as any;
+
+      const res = await updateProfile(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.nombre).toBe("Alice Candidate");
+    });
+
+    it("should allow update if callerId matches existing profile usuarioUuid", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          PK: "USER#custom-handle",
+          SK: "PROFILE",
+          usuarioUuid: "sub-12345",
+          tipoUsuario: "CANDIDATO",
+        },
+      });
+      mockDynamoSend.mockResolvedValueOnce({});
+
+      const event = {
+        pathParameters: { id: "custom-handle" },
+        headers: {
+          "x-user-id": "sub-12345",
+          "x-user-role": "CANDIDATO",
+        },
+        body: JSON.stringify({
+          nombre: "Handle User",
+        }),
+      } as any;
+
+      const res = await updateProfile(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      const data = JSON.parse(res.body);
+      expect(data.nombre).toBe("Handle User");
+    });
+
     it("should return 400 if duplicate verification request in progress", async () => {
       mockDynamoSend.mockResolvedValueOnce({
         Item: {
