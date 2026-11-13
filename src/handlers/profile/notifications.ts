@@ -410,23 +410,31 @@ export const notifyCvInteraction: APIGatewayProxyHandler = async (event) => {
     const action = body.action === "DOWNLOAD" ? "DOWNLOAD" : "VIEW";
     const companyName = body.companyName || body.empresa || "Una organización reclutadora";
     const recruiterName = body.recruiterName || body.reclutador || "";
-    const vacancyTitle = body.vacancyTitle || body.puesto || "una vacante activa";
+    const vacancyTitle = body.vacancyTitle || body.puesto || "";
 
     const recruiterEntity = recruiterName ? `${recruiterName} (${companyName})` : companyName;
 
     const isDownload = action === "DOWNLOAD";
     const title = isDownload ? "Tu CV ha sido descargado" : "Tu CV ha sido visualizado";
 
+    const contextText =
+      vacancyTitle && vacancyTitle !== "Vacante seleccionada"
+        ? `para la vacante "${vacancyTitle}"`
+        : `desde tu perfil profesional`;
+
     const message = isDownload
-      ? `${recruiterEntity} ha descargado tu Currículum Vitae para la vacante "${vacancyTitle}".`
-      : `${recruiterEntity} acaba de abrir y visualizar tu Currículum Vitae para la vacante "${vacancyTitle}".`;
+      ? `${recruiterEntity} ha descargado tu Currículum Vitae ${contextText}.`
+      : `${recruiterEntity} acaba de abrir y visualizar tu Currículum Vitae ${contextText}.`;
 
     const notifId = await createUserNotification({
       userId: candidateId,
       title,
       message,
       type: "cv_interaction",
-      url: "/candidate/my-applications",
+      url:
+        vacancyTitle && vacancyTitle !== "Vacante seleccionada"
+          ? "/candidate/my-applications"
+          : "/profile",
       extra: {
         action,
         companyName,

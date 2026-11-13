@@ -358,12 +358,16 @@ export const updateApplicationStatus: APIGatewayProxyHandler = async (event) => 
         }),
       );
 
-      sendPushToUser(candidateId, {
-        title: notifTitle,
-        body: notifMessage,
-        url: "/candidate/my-applications",
-        data: { jobId, type: "APPLICATION_UPDATE" },
-      }).catch((err) => console.error("Error sending application update push:", err));
+      try {
+        await sendPushToUser(candidateId, {
+          title: notifTitle,
+          body: notifMessage,
+          url: "/candidate/my-applications",
+          data: { jobId, type: "APPLICATION_UPDATE" },
+        });
+      } catch (err) {
+        console.error("Error sending application update push:", err);
+      }
     }
 
     return {

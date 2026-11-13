@@ -245,7 +245,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
     const jobTitle = jobResult.Item?.titulo || jobResult.Item?.title || "tu vacante";
 
     // Notificación de confirmación al candidato (siempre)
-    createUserNotification({
+    await createUserNotification({
       userId: candidateId,
       title: "¡Postulación enviada! 🎯",
       message: `Te has postulado con éxito a "${jobTitle}". Te avisaremos de cualquier actualización.`,
@@ -276,7 +276,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       // para evitar saturar a las empresas ante múltiples candidatos.
       if (targetCompanyId) {
         if (totalApplicants === 1) {
-          createUserNotification({
+          await createUserNotification({
             userId: targetCompanyId,
             title: "Nueva postulación recibida 📄",
             message: `Un candidato se ha postulado a tu vacante "${jobTitle}".`,
@@ -285,7 +285,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
             extra: { jobId: targetJobId, candidateId, totalApplicants: 1 },
           }).catch((err) => console.error("Error creating employer notification:", err));
         } else if (totalApplicants > 1 && totalApplicants % 5 === 0) {
-          createUserNotification({
+          await createUserNotification({
             userId: targetCompanyId,
             title: "Nuevas postulaciones recibidas 📄",
             message: `Tu vacante "${jobTitle}" ha alcanzado ${totalApplicants} postulaciones acumuladas.`,
@@ -298,7 +298,7 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
 
       if (totalApplicants === 50 && !jobResult.Item?.alertaAltaDemandaEnviada && targetCompanyId) {
         // 1. Notificación push en la plataforma
-        createUserNotification({
+        await createUserNotification({
           userId: targetCompanyId,
           title: "Alta demanda de postulaciones",
           message: `Tu vacante "${jobTitle}" ha alcanzado exactamente 50 postulantes.`,
