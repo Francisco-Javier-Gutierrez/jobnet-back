@@ -10,65 +10,80 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v3
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: "npm"
 
       - name: Install Dependencies
         run: npm install
 
+      - name: Typecheck & Compile TypeScript
+        run: npm run build
+
+      - name: Bundle & Package 5 Express/Event Lambdas
+        run: |
+          mkdir -p dist/zips
+          for item in \
+            "src/lambda.ts:api" \
+            "src/lambdaWs.ts:ws" \
+            "src/handlers/wsAuthorizer.ts:wsAuthorizer" \
+            "src/handlers/postConfirmation.ts:postConfirmation" \
+            "src/lambdaSuspensionExpiry.ts:suspensionExpiry"; do
+            entry="${item%%:*}"
+            name="${item##*:}"
+            mkdir -p "dist/lambdas/$name"
+            npx esbuild "$entry" \
+              --bundle \
+              --platform=node \
+              --target=node20 \
+              --format=cjs \
+              --outfile="dist/lambdas/$name/index.js" \
+              --external:@aws-sdk/*
+            (cd "dist/lambdas/$name" && zip -r "../../zips/$name.zip" .)
+          done
+          ls -lh dist/zips
+
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v2
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Terraform Init (Remote S3 State)
         run: |
           cd terraform/environments/prod
-          terraform init
+          terraform init -input=false
 
-      - name: Terraform Apply
+      - name: Terraform Apply (Infra + Compute 5 Lambdas + APIs)
+        env:
+          TF_VAR_deepseek_api_key: ${{ secrets.DEEPSEEK_API_KEY }}
+          TF_VAR_gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          TF_VAR_deepseek_api_url: ${{ vars.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions' }}
+          TF_VAR_gemini_api_url: ${{ vars.GEMINI_API_URL || 'https://generativelanguage.googleapis.com/v1beta/models' }}
+          TF_VAR_ai_provider: ${{ vars.AI_PROVIDER || 'deepseek' }}
+          TF_VAR_ai_moderation_provider: ${{ vars.AI_MODERATION_PROVIDER || 'deepseek' }}
+          TF_VAR_ai_moderation_model: ${{ vars.AI_MODERATION_MODEL || 'deepseek-chat' }}
+          TF_VAR_ai_reasoning_provider: ${{ vars.AI_REASONING_PROVIDER || 'deepseek' }}
+          TF_VAR_ai_reasoning_model: ${{ vars.AI_REASONING_MODEL || 'deepseek-chat' }}
         run: |
           cd terraform/environments/prod
-          terraform apply -auto-approve
+          terraform apply -auto-approve -input=false
+          echo "HTTP_API_URL=$(terraform output -raw http_api_url)" >> $GITHUB_ENV
+          echo "WS_API_URL=$(terraform output -raw ws_api_url)" >> $GITHUB_ENV
 
-      - name: Deploy Serverless
+      - name: Verify API Health Endpoint
         run: |
-          # Deploy Lambdas only
-          S3_UPLOAD_BUCKET="$(cd terraform/environments/prod && terraform output -raw s3_upload_bucket)"
-          COGNITO_USER_POOL_ID="$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
-          OPENSEARCH_ENDPOINT="$(cd terraform/environments/prod && terraform output -raw opensearch_endpoint)"
-          export S3_UPLOAD_BUCKET
-          export COGNITO_USER_POOL_ID
-          export OPENSEARCH_ENDPOINT
-          npx serverless deploy --stage prod
-
-      - name: Terraform API Init
-        run: |
-          cd terraform/environments/prod-api
-          terraform init
-
-      - name: Terraform API Apply
-        run: |
-          export TF_VAR_lambda_arn_getJobs="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-getJobs"
-          export TF_VAR_lambda_arn_createJob="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-createJob"
-          export TF_VAR_lambda_arn_getUploadPresignedUrl="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-getUploadPresignedUrl"
-          export TF_VAR_lambda_arn_sendNotificationEmail="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-sendNotificationEmail"
-          export TF_VAR_lambda_arn_wsAuthorizer="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsAuthorizer"
-          export TF_VAR_lambda_arn_wsConnect="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsConnect"
-          export TF_VAR_lambda_arn_wsDisconnect="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsDisconnect"
-          export TF_VAR_lambda_arn_wsDefault="arn:aws:lambda:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:function:jobnet-back-prod-wsDefault"
-          export TF_VAR_cognito_user_pool_arn="arn:aws:cognito-idp:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:userpool/$(cd terraform/environments/prod && terraform output -raw user_pool_id)"
-
-          cd terraform/environments/prod-api
-          terraform apply -auto-approve
+          echo "Checking ${HTTP_API_URL}/health ..."
+          curl --fail --show-error --retry 5 --retry-delay 5 "${HTTP_API_URL}/health"
+          echo ""
+          echo "WebSocket API: ${WS_API_URL}"
