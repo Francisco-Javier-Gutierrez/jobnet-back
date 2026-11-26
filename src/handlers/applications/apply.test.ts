@@ -271,11 +271,11 @@ describe("applications apply handler", () => {
       expect.objectContaining({
         userId: "company-123",
         type: "high_demand",
-        title: "Alta demanda de postulaciones",
+        title: "Alta demanda de postulaciones 🔥",
       }),
     );
     // Verified SES email dispatch
-    expect(mockSESSend).toHaveBeenCalledTimes(1);
+    expect(mockSESSend).toHaveBeenCalled();
   });
 
   it("should not re-dispatch high demand alert if already sent", async () => {

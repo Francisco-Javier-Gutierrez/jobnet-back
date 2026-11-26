@@ -2,6 +2,10 @@ output "user_pool_id" {
   value = aws_cognito_user_pool.pool.id
 }
 
+output "user_pool_arn" {
+  value = aws_cognito_user_pool.pool.arn
+}
+
 output "user_pool_client_id" {
   value = aws_cognito_user_pool_client.client.id
 }
@@ -10,8 +14,16 @@ output "dynamodb_table_name" {
   value = aws_dynamodb_table.jobs.name
 }
 
+output "dynamodb_table_arn" {
+  value = aws_dynamodb_table.jobs.arn
+}
+
 output "s3_upload_bucket" {
   value = aws_s3_bucket.uploads.bucket
+}
+
+output "s3_upload_bucket_arn" {
+  value = aws_s3_bucket.uploads.arn
 }
 
 output "opensearch_endpoint" {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { moderateS3Media } from "./s3ModerationHelper";
-import * as geminiModeration from "./geminiModeration";
+import * as aiModeration from "./aiModeration";
 
 const mockS3Send = vi.fn();
 
@@ -35,7 +35,7 @@ describe("S3 Media Moderation Helper", () => {
       ContentType: "image/png",
     });
 
-    const spyImage = vi.spyOn(geminiModeration, "moderateImageWithAi").mockResolvedValueOnce({
+    const spyImage = vi.spyOn(aiModeration, "moderateImageWithAi").mockResolvedValueOnce({
       safe: false,
       confidence: 0.99,
       flaggedCategories: ["NSFW"],
@@ -61,7 +61,7 @@ describe("S3 Media Moderation Helper", () => {
       ContentType: "application/pdf",
     });
 
-    const spyDoc = vi.spyOn(geminiModeration, "moderateDocumentWithAi").mockResolvedValueOnce({
+    const spyDoc = vi.spyOn(aiModeration, "moderateDocumentWithAi").mockResolvedValueOnce({
       safe: true,
       confidence: 0.95,
       flaggedCategories: [],

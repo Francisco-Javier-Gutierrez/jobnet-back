@@ -39,12 +39,12 @@ describe("ws common utilities", () => {
     it("should resolve endpoint using domainName if it contains wsApiId", () => {
       const event = {
         requestContext: {
-          domainName: "lzvcx59zaa.execute-api.us-east-1.amazonaws.com",
+          domainName: "v9b53l2zr2.execute-api.us-east-1.amazonaws.com",
           stage: "dev",
         },
       };
       const endpoint = getEndpoint(event);
-      expect(endpoint).toBe("https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev");
+      expect(endpoint).toBe("https://v9b53l2zr2.execute-api.us-east-1.amazonaws.com/dev");
     });
 
     it("should resolve fallback endpoint using WS_API_ID and default stage", () => {

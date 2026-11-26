@@ -7,6 +7,7 @@ import {
   saveAuditLog,
   executeOrgSuspensionInitiation,
   sendEmailToCompany,
+  resolveChatIncidentParties,
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
 import { extractAuthContext } from "../../utils/authHelper";
@@ -15,7 +16,7 @@ import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 export interface AuditChatMessage {
   id: string;
   senderId: string;
-  senderRole: "CANDIDATO" | "EMPRESA" | "SISTEMA";
+  senderRole: "CANDIDATO" | "ORGANIZACION" | "SISTEMA";
   senderName: string;
   text: string;
   attachmentUrl?: string | null;
@@ -31,15 +32,15 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
       id: "msg-sal-01",
       senderId: "cand-maria-77",
       senderRole: "CANDIDATO",
-      senderName: "María Fernández (Postulante)",
+      senderName: "María Fernández (Candidato)",
       text: "Hola, buen día. Vi en la vacante de Frontend Senior un rango salarial de $42,000 a $48,000 netos. ¿Es correcto para la modalidad híbrida?",
       createdAt: "2026-10-13T10:14:00Z",
     },
     {
       id: "msg-sal-02",
       senderId: "org-recruiter-99",
-      senderRole: "EMPRESA",
-      senderName: "Reclutamiento Corporativo (Empresa)",
+      senderRole: "ORGANIZACION",
+      senderName: "Reclutamiento Corporativo (Organización)",
       text: "Buen día María. La vacante dice eso en el portal para atraer perfiles senior, pero el presupuesto real autorizado es de $18,000 brutos sin prestaciones superiores. Si le interesa ese monto avanzamos, si no descartamos su perfil.",
       attachmentUrl: "/docs/contrato_modificado_18k.pdf",
       attachmentName: "contrato_modificado_18k.pdf",
@@ -50,15 +51,15 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
       id: "msg-sal-03",
       senderId: "cand-maria-77",
       senderRole: "CANDIDATO",
-      senderName: "María Fernández (Postulante)",
+      senderName: "María Fernández (Candidato)",
       text: "Eso no fue lo publicado en la oferta inicial. Me parece una práctica engañosa y una discrepancia salarial grave.",
       createdAt: "2026-10-13T10:35:00Z",
     },
     {
       id: "msg-sal-04",
       senderId: "org-recruiter-99",
-      senderRole: "EMPRESA",
-      senderName: "Reclutamiento Corporativo (Empresa)",
+      senderRole: "ORGANIZACION",
+      senderName: "Reclutamiento Corporativo (Organización)",
       text: "Es lo que hay en el mercado. Si no acepta, no nos haga perder el tiempo.",
       createdAt: "2026-10-13T10:40:00Z",
     },
@@ -68,15 +69,15 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
       id: "msg-fraud-01",
       senderId: "cand-carlos-12",
       senderRole: "CANDIDATO",
-      senderName: "Carlos Gómez (Postulante)",
+      senderName: "Carlos Gómez (Candidato)",
       text: "Hola, me postulé para la vacante de Capturista Remoto. ¿Cuáles son los siguientes pasos del proceso?",
       createdAt: "2026-10-13T09:05:00Z",
     },
     {
       id: "msg-fraud-02",
       senderId: "org-scam-01",
-      senderRole: "EMPRESA",
-      senderName: "Coordinador de Selección (Empresa)",
+      senderRole: "ORGANIZACION",
+      senderName: "Coordinador de Selección (Organización)",
       text: "Felicidades Carlos, has sido pre-seleccionado. Para enviarte la laptop y el kit de trabajo a tu domicilio, es requisito indispensable realizar un depósito previo de $1,850 MXN por concepto de seguro de paquetería express a la cuenta que te adjunto.",
       attachmentUrl: "/docs/ficha_deposito_oxxo.png",
       attachmentName: "ficha_deposito_oxxo.png",
@@ -87,7 +88,7 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
       id: "msg-fraud-03",
       senderId: "cand-carlos-12",
       senderRole: "CANDIDATO",
-      senderName: "Carlos Gómez (Postulante)",
+      senderName: "Carlos Gómez (Candidato)",
       text: "En los términos de JobNet se estipula que las empresas nunca deben cobrar a los candidatos. No realizaré ningún depósito.",
       createdAt: "2026-10-13T09:15:00Z",
     },
@@ -97,7 +98,7 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
       id: "msg-acoso-01",
       senderId: "cand-ana-33",
       senderRole: "CANDIDATO",
-      senderName: "Ana Sofía R. (Postulante)",
+      senderName: "Ana Sofía R. (Candidato)",
       text: "Adjunto mi portafolio de diseño UX y referencias laborales solicitadas.",
       attachmentUrl: "/docs/portafolio_ux_ana.pdf",
       attachmentName: "portafolio_ux_ana.pdf",
@@ -107,8 +108,8 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
     {
       id: "msg-acoso-02",
       senderId: "org-inapropiado-22",
-      senderRole: "EMPRESA",
-      senderName: "Gerente de Contratación (Empresa)",
+      senderRole: "ORGANIZACION",
+      senderName: "Gerente de Contratación (Organización)",
       text: "El portafolio se ve bien, pero para este puesto requerimos ver fotos personales de cuerpo completo en tu teléfono privado antes de la entrevista presencial.",
       createdAt: "2026-10-13T11:15:00Z",
     },
@@ -116,7 +117,7 @@ export const BASELINE_DISPUTE_CHATS: Record<string, AuditChatMessage[]> = {
       id: "msg-acoso-03",
       senderId: "cand-ana-33",
       senderRole: "CANDIDATO",
-      senderName: "Ana Sofía R. (Postulante)",
+      senderName: "Ana Sofía R. (Candidato)",
       text: "Esa solicitud es completamente inapropiada y no tiene ninguna relación con las competencias del puesto. Presentaré una queja de inmediato.",
       createdAt: "2026-10-13T11:18:00Z",
     },
@@ -174,7 +175,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
       PK: `INCIDENT#${incidentId}`,
       SK: "METADATA",
       id: incidentId,
-      targetType: "VACANTE",
+      targetType: "CHAT",
       jobId: "vac-frontend-sr-01",
       jobTitle: "Capturista / Desarrollador",
       companyId: "org-recruiter-99",
@@ -186,8 +187,39 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
       severity: "ALTA",
     };
 
-    const targetCompanyId = incident.companyId || "org-recruiter-99";
-    const targetCandidateId = incident.candidateId || incident.reporterId || "cand-maria-77";
+    // Concurrency lock: If incident is already assigned to a different moderator
+    const operatorId = auth.userId || (auth.isAdmin ? "ADMIN" : "MODERATOR");
+    const operatorName = auth.email
+      ? auth.email.split("@")[0]
+      : auth.isAdmin
+        ? "Administrador"
+        : "Moderador";
+
+    if (
+      incident.assignedModeratorId &&
+      incident.assignedModeratorId !== operatorId &&
+      !auth.isAdmin
+    ) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error: `Esta incidencia ya está siendo auditada por el moderador ${incident.assignedModeratorName || "asignado"}. Solo el moderador asignado puede intervenir.`,
+          assignedModeratorId: incident.assignedModeratorId,
+          assignedModeratorName: incident.assignedModeratorName,
+        }),
+      };
+    }
+
+    const assignedModId = incident.assignedModeratorId || operatorId;
+    const assignedModName = incident.assignedModeratorName || operatorName;
+
+    const parties = await resolveChatIncidentParties(incident);
+    const targetCompanyId = parties.companyId;
+    const targetCandidateId = parties.candidateId;
+    const jobTitle = parties.jobTitle;
+    const companyName = parties.companyName;
+    const candidateName = parties.candidateName;
     const infractionName = (incident.infraccion || "CONTROVERSIA_GRAVE").toUpperCase();
 
     // 2. Mark incident as under audit in DynamoDB
@@ -199,19 +231,26 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
           SK: "METADATA",
         },
         UpdateExpression:
-          "SET estatus = :st, auditState = :as, auditOpenedAt = :oa, auditOpenedBy = :ob, supervisionStatus = :ss, auditNotes = :an",
+          "SET estatus = :st, auditState = :as, auditOpenedAt = :oa, auditOpenedBy = :ob, assignedModeratorId = :amid, assignedModeratorName = :amname, supervisionStatus = :ss, auditNotes = :an, companyId = :cid, candidateId = :caid, jobTitle = :jt, companyName = :cn, candidateName = :can",
         ExpressionAttributeValues: {
           ":st": "AUDITORIA",
           ":as": "AUDIT_ACTIVE",
           ":oa": timestamp,
-          ":ob": "MODERADOR",
+          ":ob": assignedModName,
+          ":amid": assignedModId,
+          ":amname": assignedModName,
           ":ss": "UNDER_AUDIT",
           ":an": notes,
+          ":cid": targetCompanyId,
+          ":caid": targetCandidateId,
+          ":jt": jobTitle,
+          ":cn": companyName,
+          ":can": candidateName,
         },
       }),
     );
 
-    // 3. Notificación formal al Candidato / Postulante (In-app + Web Push)
+    // 3. Notificación formal al Candidato (In-app + Web Push)
     const notifCandId = Math.random().toString(36).substring(2, 15);
     await docClient.send(
       new PutCommand({
@@ -222,7 +261,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
           id: notifCandId,
           type: "AUDIT_CHANNEL_SUPERVISED",
           title: "Aviso de Auditoría de Mensajería: Canal Supervisado 🛡️",
-          message: `Se ha admitido formalmente la incidencia #${incidentId.substring(0, 8)} por presunto ${infractionName.toLowerCase()} en la vacante "${incident.jobTitle || incident.targetTitle}". El canal de mensajería privada con "${incident.companyName || "la organización"}" entra en periodo de revisión supervisada por Moderación.`,
+          message: `Se ha admitido formalmente la incidencia #${incidentId.substring(0, 8)} por presunto ${infractionName.toLowerCase()} en la vacante "${jobTitle}". El canal de mensajería privada con "${companyName}" será revisado por Moderación.`,
           incidentId,
           createdAt: timestamp,
           read: false,
@@ -233,7 +272,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
 
     sendPushToUser(targetCandidateId, {
       title: "Auditoría de Mensajería: Canal Supervisado 🛡️",
-      body: `El canal de mensajería para la vacante "${incident.jobTitle || "empleo"}" entra en revisión supervisada por Moderación.`,
+      body: `El canal de mensajería para la vacante "${jobTitle}" entra en revisión supervisada por Moderación.`,
       url: "/notifications",
       data: { type: "AUDIT_CHANNEL_SUPERVISED", incidentId },
     }).catch((err) => console.warn("Could not send push notification to candidate:", err));
@@ -249,7 +288,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
           id: notifOrgId,
           type: "AUDIT_CHANNEL_SUPERVISED",
           title: "Notificación Oficial: Apertura de Auditoría de Mensajería ⚠️",
-          message: `Se ha admitido a trámite una controversia grave #${incidentId.substring(0, 8)} por presunto ${infractionName.toLowerCase()} en su vacante "${incident.jobTitle || incident.targetTitle}". El canal de mensajería privada entra en periodo de revisión supervisada mientras el equipo de moderación evalúa las evidencias.`,
+          message: `Se ha admitido a trámite una controversia grave #${incidentId.substring(0, 8)} por presunto ${infractionName.toLowerCase()} en su vacante "${jobTitle}". El canal de mensajería privada entra en periodo de revisión supervisada mientras el equipo de moderación evalúa las evidencias.`,
           incidentId,
           createdAt: timestamp,
           read: false,
@@ -268,7 +307,7 @@ export const openIncidentAudit: APIGatewayProxyHandler = async (event) => {
     await sendEmailToCompany(
       targetCompanyId,
       `ALERTA DE MODERACIÓN: Notificación Oficial de Auditoría de Mensajería (#${incidentId.substring(0, 8)})`,
-      `Por medio del presente aviso oficial se le informa que el canal de mensajería directa asociado a la vacante "${incident.jobTitle || "Oferta Laboral"}" ha entrado en periodo de revisión supervisada por el equipo de moderación debido a una controversia por: ${infractionName} (${incident.reason}).\n\nDurante este procedimiento, el hilo de comunicación se encuentra en auditoría probatoria para salvaguardar la transparencia y cumplimiento de términos de JobNet.`,
+      `Por medio del presente aviso oficial se le informa que el canal de mensajería directa asociado a la vacante "${jobTitle}" ha entrado en periodo de revisión supervisada por el equipo de moderación debido a una controversia por: ${infractionName} (${incident.reason}).\n\nDurante este procedimiento, el hilo de comunicación se encuentra en auditoría probatoria para salvaguardar la transparencia y cumplimiento de términos de JobNet.`,
     );
 
     // 5. Registrar en Bitácora de Auditoría
@@ -356,7 +395,7 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
 
     const incident = incRes.Item || {
       id: incidentId,
-      targetType: "VACANTE",
+      targetType: "CHAT",
       jobId: "vac-frontend-sr-01",
       jobTitle: "Capturista de Datos / Desarrollador",
       companyId: "org-recruiter-99",
@@ -371,8 +410,9 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
       fechaCreacion: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     };
 
-    const jobId = incident.jobId || "vac-frontend-sr-01";
-    const candidateId = incident.candidateId || incident.reporterId || "cand-maria-77";
+    const parties = await resolveChatIncidentParties(incident);
+    const jobId = parties.jobId || "vac-frontend-sr-01";
+    const candidateId = parties.candidateId || "cand-maria-77";
 
     // 2. Query DynamoDB chat messages
     let messages: AuditChatMessage[] = [];
@@ -393,10 +433,10 @@ export const getIncidentAuditChat: APIGatewayProxyHandler = async (event) => {
         return {
           id: m.id || m.SK?.replace("MSG#", "") || `msg-db-${idx}`,
           senderId: m.senderId,
-          senderRole: isCandidate ? "CANDIDATO" : "EMPRESA",
+          senderRole: isCandidate ? "CANDIDATO" : "ORGANIZACION",
           senderName: isCandidate
-            ? incident.candidateName || "Postulante"
-            : incident.companyName || "Empresa",
+            ? incident.candidateName || "Candidato"
+            : incident.companyName || "Organización",
           text: m.text || "",
           attachmentUrl: m.attachmentUrl || null,
           attachmentType: m.attachmentType || null,
@@ -502,13 +542,16 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (event) =
     const body = JSON.parse(event.body || "{}");
     const { dictum, notes, graceDays } = body;
 
-    if (!dictum || !["SANCION_EMPRESA", "ADVERTENCIA", "DESESTIMADA"].includes(dictum)) {
+    if (
+      !dictum ||
+      !["SANCION_ORGANIZACION", "SANCION_EMPRESA", "ADVERTENCIA", "DESESTIMADA"].includes(dictum)
+    ) {
       return {
         statusCode: 400,
         headers,
         body: JSON.stringify({
           error:
-            "Parámetro 'dictum' inválido. Opciones: 'SANCION_EMPRESA', 'ADVERTENCIA', 'DESESTIMADA'.",
+            "Parámetro 'dictum' inválido. Opciones: 'SANCION_ORGANIZACION', 'ADVERTENCIA', 'DESESTIMADA'.",
         }),
       };
     }
@@ -534,11 +577,30 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (event) =
       infraccion: "DISCREPANCIA_SALARIAL",
     };
 
-    const companyId = incident.companyId || "org-recruiter-99";
-    const candidateId = incident.candidateId || incident.reporterId || "cand-maria-77";
+    const callerId = auth.userId || (userRole === "ADMIN" ? "ADMIN" : "MODERATOR");
+    if (
+      incident.assignedModeratorId &&
+      incident.assignedModeratorId !== callerId &&
+      userRole !== "ADMIN"
+    ) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error: `Esta incidencia ya está siendo atendida por el moderador ${
+            incident.assignedModeratorName || "asignado"
+          }. Solo el moderador asignado o un Administrador puede emitir el dictamen.`,
+        }),
+      };
+    }
+
+    const parties = await resolveChatIncidentParties(incident);
+    const companyId = parties.companyId;
+    const candidateId = parties.candidateId;
+    const jobTitle = parties.jobTitle;
 
     // 2. Execute resolution according to dictum
-    if (dictum === "SANCION_EMPRESA") {
+    if (dictum === "SANCION_ORGANIZACION" || dictum === "SANCION_EMPRESA") {
       // Activa Fase 1 de Suspensión preventiva para la organización infractora
       await executeOrgSuspensionInitiation(
         companyId,
@@ -559,6 +621,7 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (event) =
             title: "Amonestación Oficial de Moderación ⚠️",
             message: `Tras concluir la auditoría del expediente #${incidentId.substring(0, 8)}, el equipo de moderación ha dictaminado una Advertencia Formal: "${notes}". Reincidir provocará la suspensión inmediata de la cuenta corporativa.`,
             incidentId,
+            jobId: parties.jobId,
             createdAt: timestamp,
             read: false,
           },
@@ -571,6 +634,40 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (event) =
         url: "/notifications",
         data: { type: "FORMAL_WARNING", incidentId },
       }).catch((err) => console.warn("Could not send warning push:", err));
+    } else if (dictum === "DESESTIMADA") {
+      // Notificación formal a la empresa informando que la denuncia fue desestimada favorablemente
+      const notifOrgResId = Math.random().toString(36).substring(2, 15);
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            PK: `USER#${companyId}`,
+            SK: `NOTIFICATION#${timestamp}#${notifOrgResId}`,
+            id: notifOrgResId,
+            type: "AUDIT_RESOLVED",
+            title: "Resolución Favorable: Incidencia Desestimada ✅",
+            message: `La auditoría de mensajería para el expediente #${incidentId.substring(0, 8)} (${jobTitle}) ha concluido favorablemente. El equipo de moderación ha determinado que no se cometieron infracciones y la incidencia ha sido desestimada sin sanción. Dictamen: "${notes || "Sin elementos probatorios de infracción"}".`,
+            incidentId,
+            dictum,
+            jobId: parties.jobId,
+            createdAt: timestamp,
+            read: false,
+          },
+        }),
+      );
+
+      sendPushToUser(companyId, {
+        title: "Resolución Favorable: Incidencia Desestimada ✅",
+        body: `La auditoría de mensajería #${incidentId.substring(0, 8)} concluyó favorablemente sin sanciones.`,
+        url: "/notifications",
+        data: { type: "AUDIT_RESOLVED", incidentId, dictum },
+      }).catch((err) => console.warn("Could not send push to company:", err));
+
+      await sendEmailToCompany(
+        companyId,
+        `NOTIFICACIÓN OFICIAL: Resolución Favorable de Auditoría (#${incidentId.substring(0, 8)})`,
+        `Por medio del presente comunicado se le notifica que tras concluir la auditoría del expediente #${incidentId.substring(0, 8)} referente a la vacante "${jobTitle}", el equipo de moderación ha desestimado la incidencia al no encontrar violaciones a los términos de servicio.\n\nDictamen del Moderador: ${notes || "Sin infracciones comprobadas"}.\n\nSu cuenta y canales de mensajería continúan operando con total normalidad.`,
+      );
     }
 
     // 3. Notificación final al Candidato informando el resultado del dictamen
@@ -587,11 +684,19 @@ export const submitIncidentAuditDictum: APIGatewayProxyHandler = async (event) =
           message: `La auditoría de mensajería para el expediente #${incidentId.substring(0, 8)} ha concluido. Dictamen emitido por Moderación: ${dictum === "SANCION_EMPRESA" ? "Sanción aplicada a la organización" : dictum === "ADVERTENCIA" ? "Amonestación formal emitida" : "Incidencia desestimada"}.`,
           incidentId,
           dictum,
+          jobId: parties.jobId,
           createdAt: timestamp,
           read: false,
         },
       }),
     );
+
+    sendPushToUser(candidateId, {
+      title: "Resolución de Incidencia y Dictamen Final ⚖️",
+      body: `La auditoría de mensajería #${incidentId.substring(0, 8)} ha concluido. Dictamen: ${dictum === "SANCION_EMPRESA" ? "Sanción aplicada a la organización" : dictum === "ADVERTENCIA" ? "Amonestación formal emitida" : "Incidencia desestimada"}.`,
+      url: "/notifications",
+      data: { type: "AUDIT_RESOLVED", incidentId, dictum },
+    }).catch((err) => console.warn("Could not send push to candidate:", err));
 
     // 4. Update incident status in DynamoDB
     await docClient.send(

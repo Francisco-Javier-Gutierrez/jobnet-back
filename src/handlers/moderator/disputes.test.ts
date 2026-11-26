@@ -269,10 +269,10 @@ describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
 
       expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body);
-      expect(body.error).toContain("Opciones: 'SANCION_EMPRESA'");
+      expect(body.error).toContain("Opciones: 'SANCION_ORGANIZACION'");
     });
 
-    it("should execute SANCION_EMPRESA dictum with suspension initiation and audit logging", async () => {
+    it("should execute SANCION_ORGANIZACION dictum with suspension initiation and audit logging", async () => {
       // 1. Get incident
       mockDynamoSend.mockResolvedValueOnce({
         Item: {
@@ -305,7 +305,7 @@ describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
           headers: { "x-user-role": "MODERATOR" },
           pathParameters: { incidentId: "inc-salary-dispute" },
           body: JSON.stringify({
-            dictum: "SANCION_EMPRESA",
+            dictum: "SANCION_ORGANIZACION",
             notes: "Se confirma discrepancia salarial grave y engaño deliberado a los candidatos.",
             graceDays: 4,
           }),
@@ -317,7 +317,7 @@ describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.success).toBe(true);
-      expect(body.dictum).toBe("SANCION_EMPRESA");
+      expect(body.dictum).toBe("SANCION_ORGANIZACION");
       expect(mockPushSend).toHaveBeenCalled();
     });
 
@@ -355,6 +355,67 @@ describe("Auditoría de Mensajería para Disputas (Moderador)", () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.dictum).toBe("ADVERTENCIA");
+      expect(mockPushSend).toHaveBeenCalledTimes(2);
+    });
+
+    it("should record DESESTIMADA dictum and dispatch resolution notifications to BOTH candidate and company", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          id: "inc-dismiss-01",
+          jobTitle: "Desarrollador Backend",
+          companyId: "org-tech-corp",
+          candidateId: "cand-juan-55",
+          infraccion: "FRAUDE",
+        },
+      });
+
+      // 1. PutCommand company resolution notification
+      mockDynamoSend.mockResolvedValueOnce({});
+      // 2. GetCommand company profile (sendEmailToCompany)
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          PK: "USER#org-tech-corp",
+          SK: "PROFILE",
+          email: "hr@techcorplatam.com",
+          nombreComercial: "Tech Corp Latam",
+        },
+      });
+      // 3. PutCommand candidate resolution notification
+      mockDynamoSend.mockResolvedValueOnce({});
+      // 4. UpdateCommand incident status
+      mockDynamoSend.mockResolvedValueOnce({});
+      // 5. saveAuditLog
+      mockDynamoSend.mockResolvedValueOnce({});
+
+      const res: any = await submitIncidentAuditDictum(
+        {
+          headers: { "x-user-role": "MODERATOR" },
+          pathParameters: { incidentId: "inc-dismiss-01" },
+          body: JSON.stringify({
+            dictum: "DESESTIMADA",
+            notes: "No se identificaron elementos probatorios de infracción o dolo.",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.dictum).toBe("DESESTIMADA");
+      expect(mockPushSend).toHaveBeenCalledTimes(2);
+      expect(mockPushSend).toHaveBeenCalledWith(
+        "org-tech-corp",
+        expect.objectContaining({
+          title: expect.stringContaining("Incidencia Desestimada"),
+        }),
+      );
+      expect(mockPushSend).toHaveBeenCalledWith(
+        "cand-juan-55",
+        expect.objectContaining({
+          title: expect.stringContaining("Resolución de Incidencia"),
+        }),
+      );
     });
   });
 });

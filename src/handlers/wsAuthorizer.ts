@@ -1,4 +1,5 @@
 import { CognitoJwtVerifier } from "aws-jwt-verify";
+import { normalizeRole } from "../utils/authHelper";
 
 export const getVerifier = () => {
   const userPoolId = process.env.COGNITO_USER_POOL_ID;
@@ -33,13 +34,9 @@ export const handler = async (event: any) => {
 
   if (!verifier) {
     // Mock local validation
-    const customRole = (
-      (event as any).queryStringParameters?.role ||
-      (event as any).headers?.["x-user-role"] ||
-      ""
-    )
-      .toString()
-      .toUpperCase();
+    const customRole = normalizeRole(
+      (event as any).queryStringParameters?.role || (event as any).headers?.["x-user-role"],
+    );
 
     const isMod = customRole === "ADMIN" || customRole === "MODERATOR";
     const role = isMod ? "MODERATOR" : "USER";
@@ -63,9 +60,24 @@ export const handler = async (event: any) => {
         ? rawScope.split(" ").filter(Boolean)
         : [];
 
-    const customRole = (payload["custom:role"] || payload["custom:tipoUsuario"] || "")
-      .toString()
-      .toUpperCase();
+    const customRole = normalizeRole(payload["custom:role"] || payload["custom:tipoUsuario"]);
+
+    const rawGroups = payload["cognito:groups"] || (payload as any).groups || [];
+    const groups: string[] = Array.isArray(rawGroups)
+      ? rawGroups
+      : typeof rawGroups === "string"
+        ? [rawGroups]
+        : [];
+
+    const hasAdminGroup = groups.some((g: string) => g.toUpperCase() === "ADMIN");
+    const hasModGroup =
+      hasAdminGroup ||
+      groups.some(
+        (g: string) =>
+          g.toUpperCase() === "MODERATOR" ||
+          g.toUpperCase() === "MODERADOR" ||
+          g.toUpperCase().includes("MOD"),
+      );
 
     // Check scopes (e.g. 'jobnet/admin', 'jobnet/moderator', 'admin', 'moderator')
     const hasAdminScope = scopes.some((s) => s.toLowerCase().includes("admin"));
@@ -74,7 +86,12 @@ export const handler = async (event: any) => {
     );
 
     const isMod =
-      customRole === "ADMIN" || customRole === "MODERATOR" || hasAdminScope || hasModScope;
+      customRole === "ADMIN" ||
+      customRole === "MODERATOR" ||
+      customRole === "MODERADOR" ||
+      hasAdminScope ||
+      hasModScope ||
+      hasModGroup;
 
     const role = isMod ? "MODERATOR" : "USER";
 

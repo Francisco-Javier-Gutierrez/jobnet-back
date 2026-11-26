@@ -142,6 +142,20 @@ export const addCommentJob: APIGatewayProxyHandler = async (event) => {
       };
     }
 
+    const { moderateTextWithAi } = await import("../../utils/aiModeration");
+    const aiModeration = await moderateTextWithAi(content, "COMMENT");
+    if (!aiModeration.safe) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error:
+            aiModeration.reason || "El comentario infringe las políticas comunitarias de JobNet.",
+          flaggedCategories: aiModeration.flaggedCategories,
+        }),
+      };
+    }
+
     const createdAt = new Date().toISOString();
     const sk = `COMMENT#${createdAt}`;
 

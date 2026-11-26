@@ -167,6 +167,6 @@ export const estadoVacanteEnum = z.enum(
 );
 
 export const userRoleEnum = z.enum(
-  ["CANDIDATO", "ORGANIZACION", "EMPRESA", "ADMIN", "MODERATOR", "MODERADOR"],
+  ["CANDIDATO", "ORGANIZACION", "ADMIN", "MODERATOR", "MODERADOR"],
   { message: "Rol de usuario inválido." },
 );

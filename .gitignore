@@ -4,6 +4,7 @@ dist
 .esbuild
 .env
 .env.*
+!.env.example
 *.log
 terraform.tfstate
 terraform.tfstate.backup

@@ -203,7 +203,7 @@ export const createPost: APIGatewayProxyHandler = async (event) => {
     }
 
     const { evaluatePreAi } = await import("../../utils/preAiFilter");
-    const { moderateTextWithAi } = await import("../../utils/geminiModeration");
+    const { moderateTextWithAi } = await import("../../utils/aiModeration");
     const { moderateS3Media } = await import("../../utils/s3ModerationHelper");
 
     if (content) {

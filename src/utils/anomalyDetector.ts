@@ -72,6 +72,9 @@ export function detectAnomalousConcurrency(
   const orgReportsMap: Record<string, { companyName: string; dates: number[] }> = {};
 
   incidentItems.forEach((inc) => {
+    if (inc.estatus === "RESUELTO" || inc.estatus === "BLOQUEADO" || inc.isDeleted) {
+      return;
+    }
     const orgId = inc.companyId || inc.empresaUuid || inc.targetId || "unknown";
     const orgName = inc.companyName || inc.targetTitle || "Organización";
     const createdAtStr = inc.fechaCreacion || inc.createdAt;
