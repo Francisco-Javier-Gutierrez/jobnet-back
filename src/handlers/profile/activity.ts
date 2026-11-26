@@ -150,7 +150,8 @@ export const getProfileBookmarks: APIGatewayProxyHandler = async (event) => {
       ""
     ).toUpperCase();
 
-    const isPrivileged = callerRole === "ADMIN" || callerRole === "MODERATOR";
+    const isPrivileged =
+      callerRole === "ADMIN" || callerRole === "MODERATOR" || callerRole === "MODERADOR";
     const isOwner = callerId === id;
 
     if (callerId && !isOwner && !isPrivileged) {

@@ -171,6 +171,35 @@ describe("jobs interactions handlers", () => {
       expect(mockDynamoSend).not.toHaveBeenCalled();
     });
 
+    it("should reject comment on vacancy if content is flagged by AI moderation", async () => {
+      const aiMod = await import("../../utils/aiModeration");
+      const spyAi = vi.spyOn(aiMod, "moderateTextWithAi").mockResolvedValueOnce({
+        safe: false,
+        confidence: 0.98,
+        flaggedCategories: ["SCAM"],
+        reason: "El comentario promociona esquemas fraudulentos.",
+      });
+
+      const res = await addCommentJob(
+        {
+          pathParameters: { id: "job-1" },
+          body: JSON.stringify({
+            author: "Scammer",
+            content: "Gana dinero fácil invirtiendo en cripto piramidal aquí: bit.ly/fake",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.error).toBe("El comentario promociona esquemas fraudulentos.");
+      expect(data.flaggedCategories).toContain("SCAM");
+      expect(mockDynamoSend).not.toHaveBeenCalled();
+      spyAi.mockRestore();
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Comment error"));
       const res = await addCommentJob(

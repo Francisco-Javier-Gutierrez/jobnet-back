@@ -5,6 +5,7 @@ import { docClient, sesClient, tableName, headers } from "./common";
 import { createUserNotification } from "../../utils/webPushService";
 import { parseJsonBody, safeIdSchema } from "../../utils/validator";
 import { extractAuthContext } from "../../utils/authHelper";
+import { sendStyledJobNetEmail, JobNetEmailOptions } from "../../utils/emailTemplate";
 
 /**
  * POST /jobs/{id}/apply
@@ -270,10 +271,56 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
       const queryCount = countRes.Count ?? (countRes.Items ? countRes.Items.length : undefined);
       const totalApplicants = queryCount !== undefined ? queryCount : 1;
 
-      // Restricción de notificaciones a la organización:
-      // Se notifica en la 1ra postulación ("Nueva postulación recibida 📄")
-      // y posteriormente cada 5 postulaciones acumuladas (5, 10, 15, 20...)
-      // para evitar saturar a las empresas ante múltiples candidatos.
+      // Función auxiliar para enviar correos estilizados JobNet a la organización
+      const sendCompanyEmailNotification = async (
+        subject: string,
+        templateOptions: JobNetEmailOptions,
+      ) => {
+        try {
+          let companyEmail =
+            jobResult.Item?.emailContacto || jobResult.Item?.contactEmail || jobResult.Item?.email;
+
+          if (!companyEmail && targetCompanyId) {
+            try {
+              const compProfile = await docClient.send(
+                new GetCommand({
+                  TableName: tableName,
+                  Key: {
+                    PK: `USER#${targetCompanyId}`,
+                    SK: "PROFILE",
+                  },
+                }),
+              );
+              companyEmail = compProfile.Item?.email || compProfile.Item?.correoElectronico;
+            } catch (profileErr) {
+              console.error("Error fetching company profile for notification email:", profileErr);
+            }
+          }
+
+          if (companyEmail) {
+            await sendStyledJobNetEmail({
+              to: companyEmail,
+              subject,
+              templateOptions,
+            }).catch((sesErr) =>
+              console.error("Error sending styled company email notification:", sesErr),
+            );
+          }
+        } catch (err) {
+          console.error("Error in sendCompanyEmailNotification:", err);
+        }
+      };
+
+      const employerName =
+        jobResult.Item?.empresaNombre ||
+        jobResult.Item?.company ||
+        jobResult.Item?.nombreComercial ||
+        "Equipo de Selección";
+
+      // Notificaciones consistentes a la organización (Bandeja + Push + Correo con diseño JobNet):
+      // - 1ra postulación: Notificación individual
+      // - Cada 5 postulaciones (5, 10, 15, 20...): Notificación agrupada
+      // - A las 50 postulaciones: Alerta especial de alta demanda
       if (targetCompanyId) {
         if (totalApplicants === 1) {
           await createUserNotification({
@@ -284,7 +331,33 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
             url: "/vacancies",
             extra: { jobId: targetJobId, candidateId, totalApplicants: 1 },
           }).catch((err) => console.error("Error creating employer notification:", err));
-        } else if (totalApplicants > 1 && totalApplicants % 5 === 0) {
+
+          await sendCompanyEmailNotification(`Nueva postulación recibida en "${jobTitle}"`, {
+            title: "¡Has recibido tu primera postulación!",
+            badgeText: "Nueva Postulación",
+            badgeType: "success",
+            recipientName: employerName,
+            paragraphs: [
+              `¡Excelentes noticias! Un candidato se acaba de postular a tu vacante <strong>"${jobTitle}"</strong> en JobNet.`,
+              "Te recomendamos revisar su perfil profesional y currículum vitae directamente en tu panel de control para dar seguimiento al proceso de evaluación.",
+            ],
+            details: [
+              { label: "Vacante", value: jobTitle },
+              {
+                label: "Modalidad",
+                value: jobResult.Item?.modalidad || "No especificada",
+              },
+              {
+                label: "Ubicación",
+                value: jobResult.Item?.location || jobResult.Item?.municipio || "México",
+              },
+            ],
+            cta: {
+              text: "Ver Candidato en JobNet",
+              url: "https://dsty3j5u0b31g.cloudfront.net/vacancies",
+            },
+          });
+        } else if (totalApplicants > 1 && totalApplicants % 5 === 0 && totalApplicants !== 50) {
           await createUserNotification({
             userId: targetCompanyId,
             title: "Nuevas postulaciones recibidas 📄",
@@ -293,15 +366,38 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
             url: "/vacancies",
             extra: { jobId: targetJobId, totalApplicants },
           }).catch((err) => console.error("Error creating batched employer notification:", err));
+
+          await sendCompanyEmailNotification(
+            `Nuevas postulaciones recibidas: ${totalApplicants} candidatos en "${jobTitle}"`,
+            {
+              title: `Tu vacante ha acumulado ${totalApplicants} postulaciones`,
+              badgeText: "Hito de Postulaciones",
+              badgeType: "info",
+              recipientName: employerName,
+              paragraphs: [
+                `Tu oferta de empleo <strong>"${jobTitle}"</strong> continúa atrayendo el interés de los profesionales de la plataforma.`,
+                `Actualmente cuentas con un lote de <strong>${totalApplicants} postulaciones acumuladas</strong> listas para ser revisadas y filtradas.`,
+              ],
+              details: [
+                { label: "Vacante", value: jobTitle },
+                { label: "Candidatos Registrados", value: `${totalApplicants} postulaciones` },
+                { label: "Estatus de Oferta", value: "Activa y Publicada" },
+              ],
+              cta: {
+                text: "Revisar Lote de Candidatos",
+                url: "https://dsty3j5u0b31g.cloudfront.net/vacancies",
+              },
+            },
+          );
         }
       }
 
       if (totalApplicants === 50 && !jobResult.Item?.alertaAltaDemandaEnviada && targetCompanyId) {
-        // 1. Notificación push en la plataforma
+        // 1. Notificación push y bandeja en la plataforma
         await createUserNotification({
           userId: targetCompanyId,
-          title: "Alta demanda de postulaciones",
-          message: `Tu vacante "${jobTitle}" ha alcanzado exactamente 50 postulantes.`,
+          title: "Alta demanda de postulaciones 🔥",
+          message: `Tu vacante "${jobTitle}" ha alcanzado exactamente 50 candidatos postulados.`,
           type: "high_demand",
           url: `/applicants?jobId=${jobId}`,
           extra: { jobId, totalApplicants: 50 },
@@ -309,47 +405,29 @@ export const applyToJob: APIGatewayProxyHandler = async (event) => {
           console.error("Error sending high demand push notification:", pushErr),
         );
 
-        // 2. Correo electrónico automático a la organización
-        let companyEmail =
-          jobResult.Item?.emailContacto || jobResult.Item?.contactEmail || jobResult.Item?.email;
-
-        if (!companyEmail) {
-          try {
-            const compProfile = await docClient.send(
-              new GetCommand({
-                TableName: tableName,
-                Key: {
-                  PK: `USER#${targetCompanyId}`,
-                  SK: "PROFILE",
-                },
-              }),
-            );
-            companyEmail = compProfile.Item?.email || compProfile.Item?.correoElectronico;
-          } catch (profileErr) {
-            console.error("Error fetching company profile for high demand email:", profileErr);
-          }
-        }
-
-        if (companyEmail) {
-          sesClient
-            .send(
-              new SendEmailCommand({
-                Source: "noreply@franciscojgh.com",
-                Destination: { ToAddresses: [companyEmail] },
-                Message: {
-                  Subject: {
-                    Data: `Aviso de alta demanda: 50 postulantes en "${jobTitle}"`,
-                  },
-                  Body: {
-                    Text: {
-                      Data: `Hola,\n\nTe informamos que tu oferta de empleo "${jobTitle}" ha alcanzado exactamente 50 postulaciones.\n\nPuedes ingresar a JobNet para revisar los perfiles de los candidatos y dar seguimiento a los procesos de selección.\n\nAtentamente,\nEquipo JobNet`,
-                    },
-                  },
-                },
-              }),
-            )
-            .catch((sesErr) => console.error("Error sending high demand email:", sesErr));
-        }
+        // 2. Correo electrónico automático a la organización con diseño JobNet
+        await sendCompanyEmailNotification(
+          `Aviso de alta demanda: 50 candidatos en "${jobTitle}"`,
+          {
+            title: "¡Alerta de Alta Demanda! 50 candidatos registrados",
+            badgeText: "Alta Demanda 🔥",
+            badgeType: "gold",
+            recipientName: employerName,
+            paragraphs: [
+              `Tu oferta de empleo <strong>"${jobTitle}"</strong> ha alcanzado un volumen de interés sobresaliente en la plataforma con <strong>50 candidatos registrados</strong>.`,
+              "Te sugerimos evaluar a los aspirantes a la brevedad para avanzar a las fases de entrevista o pausar la vacante si ya dispones de los candidatos idóneos.",
+            ],
+            details: [
+              { label: "Vacante", value: jobTitle },
+              { label: "Total Postulaciones", value: "50 candidatos" },
+              { label: "Nivel de Concurrencia", value: "Máximo (Tendencia Alta)" },
+            ],
+            cta: {
+              text: "Gestionar Candidatos Ahora",
+              url: `https://dsty3j5u0b31g.cloudfront.net/applicants?jobId=${jobId}`,
+            },
+          },
+        );
 
         // 3. Marcar bandera para evitar envíos duplicados
         docClient

@@ -5,11 +5,7 @@
 
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { s3Client, bucketName } from "../handlers/jobs/common";
-import {
-  moderateImageWithAi,
-  moderateDocumentWithAi,
-  ModerationAiResult,
-} from "./geminiModeration";
+import { moderateImageWithAi, moderateDocumentWithAi, ModerationAiResult } from "./aiModeration";
 
 /**
  * Descarga y analiza un archivo de S3 para verificar si infringe las normas comunitarias.

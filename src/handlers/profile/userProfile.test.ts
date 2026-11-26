@@ -259,7 +259,7 @@ describe("user profile handlers", () => {
       });
 
       const event = {
-        queryStringParameters: { tipoUsuario: "EMPRESA", q: "Acme" },
+        queryStringParameters: { tipoUsuario: "ORGANIZACION", q: "Acme" },
       } as any;
 
       const res = await listProfiles(event, {} as any, () => {});

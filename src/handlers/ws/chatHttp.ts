@@ -288,7 +288,7 @@ export const sendChatMessageHttp: APIGatewayProxyHandler = async (event: any) =>
 
         let pushedSockets = 0;
         if (activeConnections.length > 0) {
-          const wsApiId = process.env.WS_API_ID || "lzvcx59zaa";
+          const wsApiId = process.env.WS_API_ID || "v9b53l2zr2";
           const wsEndpoint = isOffline
             ? "http://localhost:3002"
             : `https://${wsApiId}.execute-api.us-east-1.amazonaws.com/prod`;

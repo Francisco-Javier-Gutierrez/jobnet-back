@@ -367,4 +367,111 @@ describe("moderator suspensions handlers", () => {
       await expect(handleSuspensionExpiry(streamEvent)).resolves.not.toThrow();
     });
   });
+
+  describe("incident synchronization across sanction lifecycle", () => {
+    it("should allow ADMIN to cancel suspension without 3 messages and sync company incidents to RESUELTO", async () => {
+      mockDynamoSend.mockImplementation((command: any) => {
+        // Scan for incidents targeting company
+        if (command?.params?.ExpressionAttributeValues?.[":prefix"] === "INCIDENT#") {
+          return Promise.resolve({
+            Items: [
+              { PK: "INCIDENT#inc-101", SK: "METADATA", companyId: "comp-1", estatus: "PENDIENTE" },
+              { PK: "INCIDENT#inc-102", SK: "METADATA", targetId: "comp-1", estatus: "EVALUACION" },
+            ],
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      const event = {
+        headers: { "x-user-role": "ADMIN", "x-user-id": "admin-1" },
+        pathParameters: { id: "comp-1" },
+        body: JSON.stringify({ notes: "Cuenta verificada y rehabilitada" }),
+      } as any;
+
+      const res = await cancelSuspension(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+
+      // Verify UpdateCommands were sent for the incidents
+      const updateCalls = mockDynamoSend.mock.calls.filter((call) => {
+        const cmd = call[0];
+        return (
+          cmd?.params?.Key?.PK?.startsWith("INCIDENT#") &&
+          cmd?.params?.ExpressionAttributeValues?.[":status"] === "RESUELTO"
+        );
+      });
+
+      expect(updateCalls.length).toBe(2);
+      expect(updateCalls[0][0].params.Key.PK).toBe("INCIDENT#inc-101");
+      expect(updateCalls[0][0].params.ExpressionAttributeValues[":status"]).toBe("RESUELTO");
+      expect(updateCalls[1][0].params.Key.PK).toBe("INCIDENT#inc-102");
+    });
+
+    it("should allow ADMIN to confirm suspension and sync open company incidents to BLOQUEADO", async () => {
+      mockDynamoSend.mockImplementation((command: any) => {
+        if (command?.params?.ExpressionAttributeValues?.[":prefix"] === "INCIDENT#") {
+          return Promise.resolve({
+            Items: [
+              { PK: "INCIDENT#inc-201", SK: "METADATA", companyId: "comp-1", estatus: "PENDIENTE" },
+            ],
+          });
+        }
+        return Promise.resolve({});
+      });
+
+      const event = {
+        headers: { "x-user-role": "ADMIN", "x-user-id": "admin-1" },
+        pathParameters: { id: "comp-1" },
+        body: JSON.stringify({ reason: "Fraude masivo confirmado", force: true }),
+      } as any;
+
+      const res = await confirmSuspension(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+
+      const updateCalls = mockDynamoSend.mock.calls.filter((call) => {
+        const cmd = call[0];
+        return (
+          cmd?.params?.Key?.PK === "INCIDENT#inc-201" &&
+          cmd?.params?.ExpressionAttributeValues?.[":status"] === "BLOQUEADO"
+        );
+      });
+
+      expect(updateCalls.length).toBe(1);
+    });
+
+    it("should sync pending incidents to EVALUACION when initiateSuspension is executed", async () => {
+      mockDynamoSend.mockImplementation((command: any) => {
+        if (command?.params?.ExpressionAttributeValues?.[":prefix"] === "INCIDENT#") {
+          return Promise.resolve({
+            Items: [
+              { PK: "INCIDENT#inc-301", SK: "METADATA", companyId: "comp-1", estatus: "PENDIENTE" },
+            ],
+          });
+        }
+        if (command?.params?.Key?.SK === "PROFILE") {
+          return Promise.resolve({ Item: { email: "org@comp.com", nombre: "Comp" } });
+        }
+        return Promise.resolve({});
+      });
+
+      const event = {
+        headers: { "x-user-role": "ADMIN", "x-user-id": "admin-1" },
+        pathParameters: { id: "comp-1" },
+        body: JSON.stringify({ reason: "Pausa preventiva", graceDays: 4 }),
+      } as any;
+
+      const res = await initiateSuspension(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+
+      const updateCalls = mockDynamoSend.mock.calls.filter((call) => {
+        const cmd = call[0];
+        return (
+          cmd?.params?.Key?.PK === "INCIDENT#inc-301" &&
+          cmd?.params?.ExpressionAttributeValues?.[":status"] === "EVALUACION"
+        );
+      });
+
+      expect(updateCalls.length).toBe(1);
+    });
+  });
 });

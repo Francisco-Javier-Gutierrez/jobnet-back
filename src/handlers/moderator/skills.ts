@@ -272,23 +272,36 @@ export const resolveSkillSuggestion: APIGatewayProxyHandler = async (event) => {
           }),
         );
 
-        if (!exactCheck.Items || exactCheck.Items.length === 0) {
-          await docClient.send(
-            new PutCommand({
-              TableName: tableName,
-              Item: {
-                PK: `CATALOG#${uuid}`,
-                SK: "CATALOG",
-                GSI1PK: "CATALOG",
-                GSI1SK: `CATEGORY#${itemCategory}`,
-                name: finalName,
-                valName: finalName.toLowerCase(),
-                category: itemCategory,
-                createdAt: new Date().toISOString(),
-              },
+        if (exactCheck.Items && exactCheck.Items.length > 0 && !addAnyway) {
+          const match = exactCheck.Items[0];
+          return {
+            statusCode: 200,
+            headers,
+            body: JSON.stringify({
+              duplicate: true,
+              existingName: match.name,
+              suggestionName: finalName,
+              category: itemCategory,
+              message: `La sugerencia '${finalName}' ya existe o es similar a '${match.name}' en el catálogo oficial.`,
             }),
-          );
+          };
         }
+
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `CATALOG#${uuid}`,
+              SK: "CATALOG",
+              GSI1PK: "CATALOG",
+              GSI1SK: `CATEGORY#${itemCategory}`,
+              name: finalName,
+              valName: finalName.toLowerCase(),
+              category: itemCategory,
+              createdAt: new Date().toISOString(),
+            },
+          }),
+        );
       }
     }
 

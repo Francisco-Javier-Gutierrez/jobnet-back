@@ -55,7 +55,7 @@ describe("profile common", () => {
     const post1 = {
       PK: "POST#uuid-1",
       author: "Alice",
-      role: "Empresa",
+      role: "Organización",
       authorUuid: "u-1",
       fotoPerfil: "https://pic.jpg",
       content: "Post content",

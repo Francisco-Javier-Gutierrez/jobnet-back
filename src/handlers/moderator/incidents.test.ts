@@ -724,6 +724,62 @@ describe("moderator incidents handlers", () => {
       expect(res.statusCode).toBe(200);
     });
 
+    it("should handle CHAT incident evaluation and notify BOTH candidate and company that it will be reviewed", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          PK: "INCIDENT#inc-chat-01",
+          targetType: "CHAT",
+          targetId: "job-50#cand-70",
+          jobId: "job-50",
+          jobTitle: "Diseñador UI",
+          candidateId: "cand-70",
+          companyId: "comp-90",
+        },
+      }); // GetCommand incident
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand incident status (EVALUACION)
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand incident auditState
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand candidate notification
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand company notification
+      mockDynamoSend.mockResolvedValueOnce({}); // saveAuditLog
+
+      const event = {
+        pathParameters: { incidentId: "inc-chat-01" },
+        body: JSON.stringify({ action: "evaluate" }),
+      } as any;
+
+      const res = await resolveIncident(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).estatus).toBe("EVALUACION");
+    });
+
+    it("should handle CHAT incident approval and notify BOTH candidate and company of favorable resolution", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          PK: "INCIDENT#inc-chat-02",
+          targetType: "CHAT",
+          targetId: "job-50#cand-70",
+          jobId: "job-50",
+          jobTitle: "Diseñador UI",
+          candidateId: "cand-70",
+          companyId: "comp-90",
+        },
+      }); // GetCommand incident
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand incident status (RESUELTO)
+      mockDynamoSend.mockResolvedValueOnce({}); // UpdateCommand incident auditState
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand candidate notification
+      mockDynamoSend.mockResolvedValueOnce({}); // PutCommand company notification
+      mockDynamoSend.mockResolvedValueOnce({}); // saveAuditLog
+
+      const event = {
+        pathParameters: { incidentId: "inc-chat-02" },
+        body: JSON.stringify({ action: "approve" }),
+      } as any;
+
+      const res = await resolveIncident(event, {} as any, () => {});
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).estatus).toBe("RESUELTO");
+    });
+
     it("should return 500 on database error during resolve", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("DB error"));
 

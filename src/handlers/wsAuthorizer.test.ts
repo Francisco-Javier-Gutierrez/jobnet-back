@@ -124,6 +124,25 @@ describe("wsAuthorizer handler", () => {
     expect(res.context.role).toBe("MODERATOR");
   });
 
+  it("should grant MODERATOR role when cognito:groups contains MODERATOR or ADMIN", async () => {
+    mockVerify.mockResolvedValueOnce({
+      sub: "group-mod-123",
+      email: "mod@jobnet.com",
+      "cognito:groups": ["MODERATOR"],
+    });
+
+    const event = {
+      queryStringParameters: { token: "group-mod-token" },
+      headers: {},
+      methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
+    };
+
+    const res = await handler(event);
+    expect(res.policyDocument.Statement[0].Effect).toBe("Allow");
+    expect(res.principalId).toBe("group-mod-123");
+    expect(res.context.role).toBe("MODERATOR");
+  });
+
   it("should recognize custom:role or query role fallback", async () => {
     mockVerify.mockResolvedValueOnce({
       sub: "custom-mod-123",
@@ -144,19 +163,19 @@ describe("wsAuthorizer handler", () => {
 
   it("should recognize custom:tipoUsuario and handle missing scope/email", async () => {
     mockVerify.mockResolvedValueOnce({
-      sub: "empresa-123",
-      "custom:tipoUsuario": "EMPRESA",
+      sub: "org-123",
+      "custom:tipoUsuario": "ORGANIZACION",
     });
 
     const event = {
-      queryStringParameters: { token: "empresa-token" },
+      queryStringParameters: { token: "org-token" },
       headers: {},
       methodArn: "arn:aws:execute-api:us-east-1:123456789012:api/stage/$connect",
     };
 
     const res = await handler(event);
     expect(res.policyDocument.Statement[0].Effect).toBe("Allow");
-    expect(res.principalId).toBe("empresa-123");
+    expect(res.principalId).toBe("org-123");
     expect(res.context.email).toBe("");
     expect(res.context.scopes).toBe("");
   });
