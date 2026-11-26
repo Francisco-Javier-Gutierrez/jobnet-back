@@ -36,7 +36,8 @@ export const connect: APIGatewayProxyHandler = async (event: any) => {
 
     // 3. Save moderator broadcast mapping if user is moderator/admin
     const userRole = (event.requestContext.authorizer?.role || "").toUpperCase();
-    const isModerator = userRole === "MODERATOR" || userRole === "ADMIN";
+    const isModerator =
+      userRole === "MODERATOR" || userRole === "MODERADOR" || userRole === "ADMIN";
 
     if (isModerator) {
       await docClient.send(

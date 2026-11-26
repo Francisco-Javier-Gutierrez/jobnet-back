@@ -4,6 +4,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { SendEmailCommand } from "@aws-sdk/client-ses";
 import { s3Client, sesClient, bucketName, headers } from "./common";
 import { extractAuthContext } from "../../utils/authHelper";
+import { sendStyledJobNetEmail } from "../../utils/emailTemplate";
 
 export const getUploadPresignedUrl: APIGatewayProxyHandler = async (event) => {
   try {
@@ -157,18 +158,21 @@ export const sendNotificationEmail: APIGatewayProxyHandler = async (event) => {
   try {
     const body = JSON.parse(event.body || "{}");
     const { to, subject, message } = body;
-    await sesClient.send(
-      new SendEmailCommand({
-        Source: "noreply@franciscojgh.com",
-        Destination: {
-          ToAddresses: [to],
+    await sendStyledJobNetEmail({
+      to,
+      subject: subject || "Notificación de JobNet",
+      client: sesClient,
+      templateOptions: {
+        title: subject || "Notificación Oficial de JobNet",
+        badgeText: "Aviso JobNet",
+        badgeType: "info",
+        paragraphs: [message],
+        cta: {
+          text: "Ingresar a JobNet",
+          url: "https://dsty3j5u0b31g.cloudfront.net",
         },
-        Message: {
-          Subject: { Data: subject },
-          Body: { Text: { Data: message } },
-        },
-      }),
-    );
+      },
+    });
     return {
       statusCode: 200,
       headers,

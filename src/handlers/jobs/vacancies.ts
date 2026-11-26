@@ -517,7 +517,7 @@ export const createJob: APIGatewayProxyHandler = async (event) => {
     const descripcion = body.descripcion || body.description || "Sin descripción";
 
     const { evaluatePreAi } = await import("../../utils/preAiFilter");
-    const { moderateTextWithAi } = await import("../../utils/geminiModeration");
+    const { moderateTextWithAi } = await import("../../utils/aiModeration");
     const { moderateS3Media } = await import("../../utils/s3ModerationHelper");
 
     if (title) {
@@ -798,7 +798,8 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
       auth.isAdmin ||
       auth.isModerator ||
       headerUserRole === "ADMIN" ||
-      headerUserRole === "MODERATOR";
+      headerUserRole === "MODERATOR" ||
+      headerUserRole === "MODERADOR";
 
     const isOwner =
       Boolean(callerId) &&
@@ -819,7 +820,7 @@ export const updateJob: APIGatewayProxyHandler = async (event) => {
     }
 
     const { evaluatePreAi } = await import("../../utils/preAiFilter");
-    const { moderateTextWithAi } = await import("../../utils/geminiModeration");
+    const { moderateTextWithAi } = await import("../../utils/aiModeration");
     const { moderateS3Media } = await import("../../utils/s3ModerationHelper");
 
     if (body.title || body.titulo) {
@@ -1123,7 +1124,11 @@ export const deleteJob: APIGatewayProxyHandler = async (event) => {
       "";
 
     const isPrivileged =
-      auth.isAdmin || auth.isModerator || callerRole === "ADMIN" || callerRole === "MODERATOR";
+      auth.isAdmin ||
+      auth.isModerator ||
+      callerRole === "ADMIN" ||
+      callerRole === "MODERATOR" ||
+      callerRole === "MODERADOR";
 
     const isOwner =
       !existing.Item.empresaUuid || !callerId || existing.Item.empresaUuid === callerId;

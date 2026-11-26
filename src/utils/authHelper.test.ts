@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { extractAuthContext, getVerifier } from "./authHelper";
+import { extractAuthContext, getVerifier, normalizeRole } from "./authHelper";
 
 describe("authHelper utility", () => {
   const originalEnv = process.env;
@@ -86,5 +86,17 @@ describe("authHelper utility", () => {
     process.env.IS_OFFLINE = "true";
     const v = getVerifier();
     expect(v).toBeNull();
+  });
+
+  it("should normalize legacy, English, and placeholder roles correctly", () => {
+    expect(normalizeRole("candidate")).toBe("CANDIDATO");
+    expect(normalizeRole("CANDIDATO")).toBe("CANDIDATO");
+    expect(normalizeRole("company")).toBe("ORGANIZACION");
+    expect(normalizeRole("EMPRESA")).toBe("ORGANIZACION");
+    expect(normalizeRole("moderador")).toBe("MODERATOR");
+    expect(normalizeRole("admin")).toBe("ADMIN");
+    expect(normalizeRole("blank")).toBe("");
+    expect(normalizeRole("USER")).toBe("");
+    expect(normalizeRole("")).toBe("");
   });
 });

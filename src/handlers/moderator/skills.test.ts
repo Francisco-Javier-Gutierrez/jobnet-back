@@ -216,6 +216,32 @@ describe("moderator skills handlers", () => {
       expect(res.action).toBe("APPROVED");
     });
 
+    it("should return duplicate: true if similar or exact catalog item exists and addAnyway is false", async () => {
+      mockDynamoSend.mockResolvedValueOnce({
+        Item: {
+          PK: "SUGGESTION#SKILL#skill-1",
+          SK: "METADATA",
+          name: "React",
+          category: "Habilidad",
+        },
+      }); // Suggestion lookup
+      mockDynamoSend.mockResolvedValueOnce({
+        Items: [{ PK: "CATALOG#cat-1", name: "React", valName: "react" }],
+      }); // exactCheck found duplicate
+
+      const event = {
+        pathParameters: { id: "skill-1" },
+        body: JSON.stringify({ approve: true }),
+      } as any;
+
+      const response = await resolveSkillSuggestion(event, {} as any, () => {});
+      expect(response.statusCode).toBe(200);
+
+      const res = JSON.parse(response.body);
+      expect(res.duplicate).toBe(true);
+      expect(res.existingName).toBe("React");
+    });
+
     it("should approve skill suggestion with unifyMode REPLACE_EXISTING", async () => {
       mockDynamoSend.mockResolvedValueOnce({
         Item: {

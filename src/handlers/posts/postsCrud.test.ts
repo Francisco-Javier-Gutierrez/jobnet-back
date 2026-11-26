@@ -30,6 +30,15 @@ vi.mock("@aws-sdk/lib-dynamodb", () => ({
   },
 }));
 
+vi.mock("../../utils/aiModeration", () => ({
+  moderateTextWithAi: vi.fn().mockResolvedValue({
+    safe: true,
+    confidence: 1.0,
+    flaggedCategories: [],
+    reason: null,
+  }),
+}));
+
 vi.mock("../../utils/geminiModeration", () => ({
   moderateTextWithAi: vi.fn().mockResolvedValue({
     safe: true,

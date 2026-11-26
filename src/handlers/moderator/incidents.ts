@@ -17,10 +17,14 @@ import {
   blockCorporateDomain,
   getOrgAppealMessageCount,
   executeOrgSuspensionInitiation,
+  resolveChatIncidentParties,
+  syncCompanyIncidents,
 } from "./common";
+import { sendStyledJobNetEmail } from "../../utils/emailTemplate";
 import { sendPushToUser } from "../../utils/webPushService";
 import { parseJsonBody } from "../../utils/validator";
 import { extractAuthContext } from "../../utils/authHelper";
+import { notifyAllModerators } from "../../utils/moderatorNotifier";
 
 export const getIncidents: APIGatewayProxyHandler = async () => {
   try {
@@ -63,11 +67,17 @@ export const getIncidents: APIGatewayProxyHandler = async () => {
         postTitle: item.postTitle || "",
         companyId: item.companyId || "",
         companyName: item.companyName || "",
+        candidateId: item.candidateId || "",
+        candidateName: item.candidateName || "",
+        reporterId: item.reporterId || "",
         reporter: item.reporter || "Anónimo",
         reason: item.reason || "",
         severity: item.severity || "media",
         infraccion: item.infraccion || "otro",
         estatus: item.estatus || "PENDIENTE",
+        auditState: item.auditState || undefined,
+        auditOpenedAt: item.auditOpenedAt || undefined,
+        auditOpenedBy: item.auditOpenedBy || undefined,
         fechaCreacion: item.fechaCreacion || "",
       }))
       .sort((a, b) => b.fechaCreacion.localeCompare(a.fechaCreacion));
@@ -92,6 +102,7 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     if (!parseResult.success) {
       return parseResult.response;
     }
+    const auth = await extractAuthContext(event);
     const body = parseResult.data;
     const {
       jobId,
@@ -100,6 +111,9 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
       postTitle,
       companyId,
       companyName,
+      candidateId,
+      candidateName,
+      reporterId,
       targetType,
       targetId,
       targetTitle,
@@ -130,6 +144,51 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
     const uuid = Math.random().toString(36).substring(2, 15);
     const createdAt = new Date().toISOString();
 
+    const isCandidate =
+      (auth.role || "").toUpperCase() === "CANDIDATO" ||
+      (auth.role || "").toUpperCase() === "CANDIDATE";
+
+    let resolvedJobId = jobId || "";
+    let resolvedCandidateId = candidateId || "";
+    let resolvedCompanyId = companyId || "";
+    let resolvedJobTitle = jobTitle || "";
+    let resolvedCompanyName = companyName || "";
+    const resolvedCandidateName = candidateName || "";
+
+    if (targetType === "CHAT" || (targetId && targetId.includes("#"))) {
+      if (targetId && targetId.includes("#")) {
+        const parts = targetId.split("#");
+        if (!resolvedJobId && parts[0]) resolvedJobId = parts[0];
+        if (!resolvedCandidateId && parts[1]) resolvedCandidateId = parts[1];
+      }
+      if (resolvedJobId && (!resolvedCompanyId || !resolvedJobTitle || !resolvedCompanyName)) {
+        try {
+          const vacRes = await docClient.send(
+            new GetCommand({
+              TableName: tableName,
+              Key: { PK: `VACANCY#${resolvedJobId}`, SK: "METADATA" },
+            }),
+          );
+          if (vacRes.Item) {
+            if (!resolvedCompanyId)
+              resolvedCompanyId = vacRes.Item.empresaUuid || vacRes.Item.companyId || "";
+            if (!resolvedJobTitle) resolvedJobTitle = vacRes.Item.titulo || vacRes.Item.title || "";
+            if (!resolvedCompanyName)
+              resolvedCompanyName =
+                vacRes.Item.company || vacRes.Item.empresaNombre || vacRes.Item.nombreEmpresa || "";
+          }
+        } catch (e) {
+          console.warn("Could not query vacancy for chat incident:", e);
+        }
+      }
+      if (isCandidate && !resolvedCandidateId) {
+        resolvedCandidateId = auth.userId || "";
+      }
+      if (!isCandidate && !resolvedCompanyId) {
+        resolvedCompanyId = auth.userId || "";
+      }
+    }
+
     const incidentItem = {
       PK: `INCIDENT#${uuid}`,
       SK: "METADATA",
@@ -137,16 +196,29 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
         targetType ||
         (jobId ? "VACANTE" : postId ? "POST" : companyId ? "ORGANIZACION" : "GENERAL"),
       targetId: targetId || jobId || postId || companyId || "",
-      targetTitle: targetTitle || jobTitle || postTitle || companyName || "",
-      jobId: jobId || (targetType === "VACANTE" ? targetId : ""),
-      jobTitle: jobTitle || (targetType === "VACANTE" ? targetTitle : ""),
+      targetTitle:
+        targetTitle ||
+        resolvedJobTitle ||
+        jobTitle ||
+        postTitle ||
+        resolvedCompanyName ||
+        companyName ||
+        "",
+      jobId: resolvedJobId || jobId || (targetType === "VACANTE" ? targetId : ""),
+      jobTitle: resolvedJobTitle || jobTitle || (targetType === "VACANTE" ? targetTitle : ""),
       postId: postId || (targetType === "POST" ? targetId : ""),
       companyId:
-        companyId || (targetType === "ORGANIZACION" || targetType === "EMPRESA" ? targetId : ""),
+        resolvedCompanyId ||
+        companyId ||
+        (targetType === "ORGANIZACION" || targetType === "EMPRESA" ? targetId : ""),
       companyName:
+        resolvedCompanyName ||
         companyName ||
         (targetType === "ORGANIZACION" || targetType === "EMPRESA" ? targetTitle : ""),
-      reporter: reporter || "Anónimo",
+      candidateId: resolvedCandidateId || candidateId || (isCandidate ? auth.userId : ""),
+      candidateName: resolvedCandidateName || candidateName || "",
+      reporterId: reporterId || auth.userId || "",
+      reporter: reporter || auth.email || "Anónimo",
       reason,
       severity: severity || "media",
       infraccion: infraccion || "otro",
@@ -163,6 +235,37 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
         Item: cleanItem,
       }),
     );
+
+    // Notificación en bandeja al denunciante confirmando que la incidencia será revisada por moderación
+    if (targetType === "CHAT" && auth.userId) {
+      const notifRepId = Math.random().toString(36).substring(2, 15);
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: {
+            PK: `USER#${auth.userId}`,
+            SK: `NOTIFICATION#${createdAt}#${notifRepId}`,
+            id: notifRepId,
+            type: "INCIDENT_REPORTED",
+            title: "Reporte Registrado: Incidencia en Revisión 📋",
+            message: `Hemos recibido tu reporte sobre la conversación asociada a "${resolvedJobTitle || jobTitle || targetTitle || "la vacante"}". La incidencia será revisada por el equipo de moderación.`,
+            incidentId: uuid,
+            jobId: resolvedJobId || jobId || "",
+            companyId: resolvedCompanyId || companyId || "",
+            candidateId: resolvedCandidateId || candidateId || "",
+            createdAt,
+            read: false,
+          },
+        }),
+      );
+
+      sendPushToUser(auth.userId, {
+        title: "Reporte Registrado: Incidencia en Revisión 📋",
+        body: `Tu reporte sobre la conversación será revisado por Moderación.`,
+        url: "/notifications",
+        data: { type: "INCIDENT_REPORTED", incidentId: uuid },
+      }).catch((err) => console.warn("Could not send push notification to reporter:", err));
+    }
 
     // RF-72: Flag de Suspensión por Denuncias
     // Si una vacante acumula 5 o más reportes independientes en menos de 12 horas,
@@ -223,6 +326,15 @@ export const createIncident: APIGatewayProxyHandler = async (event) => {
         });
       }
     }
+
+    // Disparar notificación a todos los moderadores sobre la nueva incidencia
+    notifyAllModerators({
+      title: "Nueva Incidencia Reportada ⚠️",
+      message: `${auth.email || "Usuario"} reportó una infracción de tipo ${infraccion || "controversia"}: "${reason.substring(0, 100)}".`,
+      type: "NEW_INCIDENT_REPORT",
+      url: "/mod/incidents",
+      data: { incidentId: uuid, targetType, infraccion },
+    }).catch((err) => console.warn("Could not notify moderators of incident:", err));
 
     return {
       statusCode: 201,
@@ -356,6 +468,25 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
 
     const incident = existing.Item;
 
+    // Concurrency lock: If incident is already assigned to a different moderator
+    if (
+      incident.assignedModeratorId &&
+      incident.assignedModeratorId !== operatorId &&
+      operatorRole !== "ADMIN"
+    ) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error: `Esta incidencia ya está siendo atendida por el moderador ${
+            incident.assignedModeratorName || "asignado"
+          }.`,
+          assignedModeratorId: incident.assignedModeratorId,
+          assignedModeratorName: incident.assignedModeratorName,
+        }),
+      };
+    }
+
     // Retrieve target company ID
     let targetCompanyId = incident.companyId;
     if (!targetCompanyId && incident.jobId) {
@@ -376,7 +507,8 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
     // Require at least 3 messages from the organization if resolving an evaluated incident/appeal
     if (
       (existing.Item.estatus === "EVALUACION" || action === "approve" || action === "block") &&
-      incident.jobId
+      incident.jobId &&
+      incident.targetType !== "CHAT"
     ) {
       if (targetCompanyId) {
         const orgMsgCount = await getOrgAppealMessageCount(targetCompanyId);
@@ -413,7 +545,203 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
       }),
     );
 
-    if (incident.jobId) {
+    if (incident.targetType === "CHAT") {
+      const parties = await resolveChatIncidentParties(incident);
+      const timestamp = new Date().toISOString();
+      const targetCompanyId = parties.companyId;
+      const targetCandidateId = parties.candidateId;
+      const jobTitle = parties.jobTitle;
+
+      if (action === "evaluate") {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: `INCIDENT#${incidentId}`, SK: "METADATA" },
+            UpdateExpression: "SET auditState = :as, supervisionStatus = :ss",
+            ExpressionAttributeValues: { ":as": "AUDIT_ACTIVE", ":ss": "UNDER_AUDIT" },
+          }),
+        );
+
+        // Notificación formal al Candidato (In-app + Push)
+        const notifCandId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCandidateId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifCandId}`,
+              id: notifCandId,
+              type: "AUDIT_CHANNEL_SUPERVISED",
+              title: "Aviso de Auditoría de Mensajería: Canal Supervisado 🛡️",
+              message: `La conversación asociada a la vacante "${jobTitle}" será revisada por el equipo de moderación tras admitirse la incidencia.`,
+              incidentId,
+              jobId: parties.jobId,
+              createdAt: timestamp,
+              read: false,
+              actionType: "AUDIT_OPENED",
+            },
+          }),
+        );
+
+        // Notificación formal a la Empresa (In-app + Push)
+        const notifOrgId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCompanyId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifOrgId}`,
+              id: notifOrgId,
+              type: "AUDIT_CHANNEL_SUPERVISED",
+              title: "Notificación Oficial: Conversación en Revisión ⚠️",
+              message: `El canal de mensajería asociado a la vacante "${jobTitle}" será revisado por el equipo de moderación debido a un reporte de presunta infracción.`,
+              incidentId,
+              jobId: parties.jobId,
+              createdAt: timestamp,
+              read: false,
+              actionType: "AUDIT_OPENED",
+            },
+          }),
+        );
+
+        sendPushToUser(targetCandidateId, {
+          title: "Auditoría de Mensajería: Canal Supervisado 🛡️",
+          body: `El canal de mensajería para la vacante "${jobTitle}" entra en revisión supervisada por Moderación.`,
+          url: "/notifications",
+          data: { type: "AUDIT_CHANNEL_SUPERVISED", incidentId },
+        }).catch(() => {});
+
+        sendPushToUser(targetCompanyId, {
+          title: "Apertura de Auditoría de Mensajería Directa ⚠️",
+          body: `Su canal de mensajería para "${jobTitle}" entra en revisión supervisada.`,
+          url: "/notifications",
+          data: { type: "AUDIT_CHANNEL_SUPERVISED", incidentId },
+        }).catch(() => {});
+      } else if (action === "approve") {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: `INCIDENT#${incidentId}`, SK: "METADATA" },
+            UpdateExpression: "SET auditState = :as, auditDictum = :ad, supervisionStatus = :ss",
+            ExpressionAttributeValues: {
+              ":as": "AUDIT_CONCLUDED",
+              ":ad": "DESESTIMADA",
+              ":ss": "CONCLUDED",
+            },
+          }),
+        );
+
+        const notifCandId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCandidateId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifCandId}`,
+              id: notifCandId,
+              type: "AUDIT_RESOLVED",
+              title: "Resolución de Incidencia: Caso Concluido ⚖️",
+              message: `La evaluación de la conversación asociada a la vacante "${jobTitle}" ha concluido. La incidencia ha sido desestimada sin sanción.`,
+              incidentId,
+              dictum: "DESESTIMADA",
+              jobId: parties.jobId,
+              createdAt: timestamp,
+              read: false,
+            },
+          }),
+        );
+
+        const notifOrgId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCompanyId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifOrgId}`,
+              id: notifOrgId,
+              type: "AUDIT_RESOLVED",
+              title: "Resolución Favorable: Incidencia Desestimada ✅",
+              message: `La evaluación de la conversación asociada a la vacante "${jobTitle}" ha concluido favorablemente sin sanción.`,
+              incidentId,
+              dictum: "DESESTIMADA",
+              jobId: parties.jobId,
+              createdAt: timestamp,
+              read: false,
+            },
+          }),
+        );
+
+        sendPushToUser(targetCandidateId, {
+          title: "Resolución de Incidencia: Caso Concluido ⚖️",
+          body: `La incidencia de chat para "${jobTitle}" ha sido desestimada sin sanción.`,
+          url: "/notifications",
+          data: { type: "AUDIT_RESOLVED", incidentId },
+        }).catch(() => {});
+
+        sendPushToUser(targetCompanyId, {
+          title: "Resolución Favorable: Incidencia Desestimada ✅",
+          body: `La incidencia de chat para "${jobTitle}" fue desestimada favorablemente.`,
+          url: "/notifications",
+          data: { type: "AUDIT_RESOLVED", incidentId },
+        }).catch(() => {});
+      } else if (action === "block") {
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: `INCIDENT#${incidentId}`, SK: "METADATA" },
+            UpdateExpression: "SET auditState = :as, auditDictum = :ad, supervisionStatus = :ss",
+            ExpressionAttributeValues: {
+              ":as": "AUDIT_CONCLUDED",
+              ":ad": "SANCION_EMPRESA",
+              ":ss": "CONCLUDED",
+            },
+          }),
+        );
+
+        await executeOrgSuspensionInitiation(
+          targetCompanyId,
+          `Dictamen de Incidencia de Chat: Infracción confirmada en mensajería de vacante "${jobTitle}".`,
+          4,
+          operatorRole,
+          operatorId,
+        );
+
+        const notifCandId = Math.random().toString(36).substring(2, 15);
+        await docClient.send(
+          new PutCommand({
+            TableName: tableName,
+            Item: {
+              PK: `USER#${targetCandidateId}`,
+              SK: `NOTIFICATION#${timestamp}#${notifCandId}`,
+              id: notifCandId,
+              type: "AUDIT_RESOLVED",
+              title: "Resolución de Incidencia: Sanción Aplicada ⚖️",
+              message: `La evaluación de la conversación asociada a la vacante "${jobTitle}" ha concluido. Se ha sancionado a la organización infractora.`,
+              incidentId,
+              dictum: "SANCION_EMPRESA",
+              jobId: parties.jobId,
+              createdAt: timestamp,
+              read: false,
+            },
+          }),
+        );
+
+        sendPushToUser(targetCandidateId, {
+          title: "Resolución de Incidencia: Sanción Aplicada ⚖️",
+          body: `La incidencia de chat para "${jobTitle}" concluyó con sanción aplicada a la empresa.`,
+          url: "/notifications",
+          data: { type: "AUDIT_RESOLVED", incidentId },
+        }).catch(() => {});
+      }
+
+      await saveAuditLog({
+        targetId: incidentId,
+        targetType: "INCIDENTE",
+        action: `RESOLUCION_CHAT_${action.toUpperCase()}`,
+        reason: `Resolución de incidencia de chat (${action}) ejecutada por ${operatorRole}. Ambas partes notificadas.`,
+        executorId: operatorId,
+      });
+    } else if (incident.jobId) {
       if (action === "block") {
         // Borrado Lógico de la vacante fraudulenta
         const timestamp = new Date().toISOString();
@@ -517,26 +845,36 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               const companyEmail = compProfileRes.Item.email;
 
               // Send SES Email for Blocked Vacancy
-              await sesClient
-                .send(
-                  new SendEmailCommand({
-                    Source: "noreply@franciscojgh.com",
-                    Destination: {
-                      ToAddresses: [companyEmail],
-                    },
-                    Message: {
-                      Subject: {
-                        Data: `Resolución Desfavorable: Vacante Eliminada`,
-                      },
-                      Body: {
-                        Text: {
-                          Data: `Estimado reclutador,\n\nTras la evaluación de la apelación de su vacante "${incident.jobTitle || "Sancionada"}", la resolución ha sido en su contra y la vacante ha sido eliminada definitivamente del Job Board por infracción de nuestras normas.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
-                        },
-                      },
-                    },
-                  }),
-                )
-                .catch((err) => console.error("Error sending SES block email:", err));
+              await sendStyledJobNetEmail({
+                to: companyEmail,
+                subject: "Resolución Desfavorable: Vacante Eliminada",
+                client: sesClient,
+                templateOptions: {
+                  title: "Resolución de Apelación: Sanción Ratificada",
+                  badgeText: "Vacante Eliminada",
+                  badgeType: "danger",
+                  recipientName: compProfileRes.Item.nombreComercial || "Reclutador",
+                  paragraphs: [
+                    `Te informamos que tras una exhaustiva auditoría del equipo de moderación sobre la apelación presentada para la vacante <strong>"${incident.jobTitle || "Sancionada"}"</strong>, la resolución final ha determinado ratificar la sanción.`,
+                    `Por infringir las políticas de publicación y seguridad de JobNet, la vacante ha sido eliminada de manera definitiva del Job Board.`,
+                  ],
+                  highlightBox: {
+                    title: "Dictamen de Moderación",
+                    text: "La vacante no cumple con los estándares comunitarios y de veracidad requeridos.",
+                    type: "danger",
+                  },
+                  details: [
+                    { label: "Vacante", value: incident.jobTitle || "Sancionada" },
+                    { label: "Resolución", value: "Apelación Desestimada / Vacante Eliminada" },
+                  ],
+                  cta: {
+                    text: "Revisar Términos y Condiciones",
+                    url: "https://dsty3j5u0b31g.cloudfront.net/terms",
+                  },
+                  secondaryNotice:
+                    "Publicaciones sucesivas que violen las normas pueden derivar en la suspensión definitiva del perfil corporativo.",
+                },
+              }).catch((err) => console.error("Error sending SES block email:", err));
 
               const compDomain = companyEmail.split("@")[1];
               await blockCorporateDomain(
@@ -666,26 +1004,36 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
           }).catch((err) => console.error("Error sending push for paused vacancy:", err));
 
           // Send warning email via SES
-          await sesClient
-            .send(
-              new SendEmailCommand({
-                Source: "noreply@franciscojgh.com",
-                Destination: {
-                  ToAddresses: [companyEmail],
-                },
-                Message: {
-                  Subject: {
-                    Data: `ALERTA: Vacante "${jobTitle}" Pausada para Evaluación`,
-                  },
-                  Body: {
-                    Text: {
-                      Data: `Estimado reclutador,\n\nTu publicación de empleo "${jobTitle}" ha sido pausada temporalmente por moderadores de JobNet debido a reportes de sospecha de infracción:\n\nMotivo del reporte: ${incident.reason}\n\nSe ha iniciado un periodo de gracia de 15 días. Tienes hasta el ${graceLimit.toLocaleDateString()} para apelar esta sanción ingresando a la sección "Mis Vacantes" en tu panel de reclutador y seleccionando la opción "Apelar".\n\nAtentamente,\nEquipo de Moderación de JobNet`,
-                    },
-                  },
-                },
-              }),
-            )
-            .catch((err) => console.error("Error sending SES email for vacancy evaluation:", err));
+          await sendStyledJobNetEmail({
+            to: companyEmail,
+            subject: `ALERTA: Vacante "${jobTitle}" Pausada para Evaluación`,
+            client: sesClient,
+            templateOptions: {
+              title: "Vacante Pausada Preventivamente",
+              badgeText: "Revisión Requerida ⚠️",
+              badgeType: "warning",
+              recipientName: vacancy.Item.company || "Reclutador",
+              paragraphs: [
+                `Te notificamos que la publicación de empleo <strong>"${jobTitle}"</strong> ha sido pausada de manera preventiva por el equipo de moderación tras recibir reportes de presunta infracción.`,
+                `La vacante permanecerá oculta en el Job Board mientras se resuelve el proceso de evaluación.`,
+              ],
+              highlightBox: {
+                title: "Motivo del reporte / sanción",
+                text: incident.reason || "Reporte de posible infracción a políticas comunitarias",
+                type: "warning",
+              },
+              details: [
+                { label: "Vacante", value: jobTitle },
+                { label: "Límite para Apelar", value: graceLimit.toLocaleDateString() },
+                { label: "Periodo de Gracia", value: "15 días naturales" },
+              ],
+              cta: {
+                text: "Ir a Mis Vacantes y Apelar",
+                url: "https://dsty3j5u0b31g.cloudfront.net/recruiter/my-vacancies",
+              },
+              secondaryNotice: `Dispones hasta el ${graceLimit.toLocaleDateString()} para presentar aclaraciones en la sección "Mis Vacantes" seleccionando "Apelar".`,
+            },
+          }).catch((err) => console.error("Error sending SES email for vacancy evaluation:", err));
         }
       } else if (action === "approve") {
         // Fase 3 — Reactivar vacante (apelación favorable)
@@ -759,26 +1107,31 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               const companyEmail = compProfileRes.Item.email;
 
               // Send SES Email for Approved Vacancy
-              await sesClient
-                .send(
-                  new SendEmailCommand({
-                    Source: "noreply@franciscojgh.com",
-                    Destination: {
-                      ToAddresses: [companyEmail],
-                    },
-                    Message: {
-                      Subject: {
-                        Data: `Resolución Favorable: Vacante Reactivada`,
-                      },
-                      Body: {
-                        Text: {
-                          Data: `Estimado reclutador,\n\nNos complace informarle que la evaluación de su apelación referente a la vacante "${incident.jobTitle || "Pausada"}" ha concluido de manera favorable.\n\nSu vacante ha sido reactivada y ya se encuentra visible nuevamente en el Job Board.\n\nAtentamente,\nEquipo de Moderación de JobNet`,
-                        },
-                      },
-                    },
-                  }),
-                )
-                .catch((err) => console.error("Error sending SES approve email:", err));
+              await sendStyledJobNetEmail({
+                to: companyEmail,
+                subject: "Resolución Favorable: Vacante Reactivada",
+                client: sesClient,
+                templateOptions: {
+                  title: "¡Apelación Favorable! Tu vacante ha sido reactivada",
+                  badgeText: "Vacante Reactivada 🎉",
+                  badgeType: "success",
+                  recipientName: compProfileRes.Item.nombreComercial || "Reclutador",
+                  paragraphs: [
+                    `Nos complace informarte que la evaluación de la apelación referente a la vacante <strong>"${incident.jobTitle || "Pausada"}"</strong> ha concluido de manera satisfactoria y favorable.`,
+                    `Las aclaraciones presentadas han sido validadas por el equipo de moderación y tu publicación se encuentra nuevamente visible y activa en el Job Board.`,
+                  ],
+                  details: [
+                    { label: "Vacante", value: incident.jobTitle || "Reactivada" },
+                    { label: "Estado", value: "Pública y Recibiendo Candidaturas" },
+                  ],
+                  cta: {
+                    text: "Ver Vacante en JobNet",
+                    url: "https://dsty3j5u0b31g.cloudfront.net/vacancies",
+                  },
+                  secondaryNotice:
+                    "Gracias por colaborar con el equipo de moderación para asegurar la calidad y transparencia en nuestra plataforma.",
+                },
+              }).catch((err) => console.error("Error sending SES approve email:", err));
             }
           } catch (e) {
             console.error("Error sending approve email:", e);
@@ -828,7 +1181,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               ":sr": incident.reason || "Dictamen desfavorable",
               ":u": timestamp,
               ":gsiPk": "PROFILE",
-              ":gsiSk": "ROLE#EMPRESA#STATUS#SUSPENDIDA",
+              ":gsiSk": "ROLE#ORGANIZACION#STATUS#SUSPENDIDA",
             },
           }),
         );
@@ -848,6 +1201,14 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               read: false,
             },
           }),
+        );
+
+        await syncCompanyIncidents(
+          targetCompanyId,
+          "BLOQUEADO",
+          incident.reason || "Dictamen desfavorable",
+          operatorRole,
+          operatorId,
         );
       } else if (action === "approve") {
         const timestamp = new Date().toISOString();
@@ -871,7 +1232,7 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               ":ss": "CANCELLED",
               ":u": timestamp,
               ":gsiPk": "PROFILE",
-              ":gsiSk": "ROLE#EMPRESA#STATUS#ACTIVO",
+              ":gsiSk": "ROLE#ORGANIZACION#STATUS#ACTIVO",
             },
           }),
         );
@@ -891,6 +1252,14 @@ export const resolveIncident: APIGatewayProxyHandler = async (event) => {
               read: false,
             },
           }),
+        );
+
+        await syncCompanyIncidents(
+          targetCompanyId,
+          "RESUELTO",
+          "Apelación aprobada / reporte desestimado",
+          operatorRole,
+          operatorId,
         );
       }
     } else if (incident.postId) {

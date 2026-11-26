@@ -5,12 +5,16 @@ import {
   moderateDocumentWithAi,
 } from "./geminiModeration";
 
-describe("Gemini Multimodal Moderation Service (Nivel 1)", () => {
+describe("Gemini Multimodal Moderation Service (Retrocompatibilidad)", () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env = { ...originalEnv, GEMINI_API_KEY: "test-fake-key" };
+    process.env = {
+      ...originalEnv,
+      AI_MODERATION_PROVIDER: "gemini",
+      GEMINI_API_KEY: "test-fake-key",
+    };
   });
 
   afterEach(() => {
@@ -21,6 +25,9 @@ describe("Gemini Multimodal Moderation Service (Nivel 1)", () => {
     it("should return safe default when GEMINI_API_KEY is not defined", async () => {
       delete process.env.GEMINI_API_KEY;
       delete process.env.GOOGLE_AI_KEY;
+      delete process.env.DEEPSEEK_API_KEY;
+      delete process.env.AI_API_KEY;
+      delete process.env.AI_MODERATION_API_KEY;
 
       const result = await moderateTextWithAi("Cualquier texto");
       expect(result.safe).toBe(true);

@@ -15,6 +15,7 @@ import {
   getOrgAppealMessageCount,
   executeOrgSuspensionInitiation,
   sendEmailToCompany,
+  syncCompanyIncidents,
 } from "./common";
 import { sendPushToUser } from "../../utils/webPushService";
 import { extractAuthContext } from "../../utils/authHelper";
@@ -177,9 +178,9 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
       }
     }
 
-    // Validar regla de al menos 3 mensajes por parte de la organización en el chat
+    // Validar regla de al menos 3 mensajes por parte de la organización en el chat (los administradores y llamadas forzadas pueden omitir)
     const orgMsgCount = await getOrgAppealMessageCount(companyId);
-    if (orgMsgCount < 3) {
+    if (!auth.isAdmin && !body.force && orgMsgCount < 3) {
       return {
         statusCode: 400,
         headers,
@@ -213,7 +214,7 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
           ":rbu": callerId,
           ":u": timestamp,
           ":gsiPk": "PROFILE",
-          ":gsiSk": "ROLE#EMPRESA#STATUS#ACTIVO",
+          ":gsiSk": "ROLE#ORGANIZACION#STATUS#ACTIVO",
         },
       }),
     );
@@ -262,6 +263,15 @@ export const cancelSuspension: APIGatewayProxyHandler = async (event) => {
 
     // 5. Broadcast WS de resolución
     await broadcastAppealResolved(companyId, "CANCELLED", event);
+
+    // 6. Sincronizar atómicamente incidencias abiertas de la organización a estado RESUELTO
+    await syncCompanyIncidents(
+      companyId,
+      "RESUELTO",
+      `Suspensión revocada / Apelación aprobada: ${notes}`,
+      callerRole,
+      callerId,
+    );
 
     return {
       statusCode: 200,
@@ -340,9 +350,9 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
       }
     }
 
-    // Validar regla de al menos 3 mensajes por parte de la organización en el chat (o periodo expirado / forzado por falta de respuesta)
+    // Validar regla de al menos 3 mensajes por parte de la organización en el chat (o periodo expirado / forzado por falta de respuesta / administrador)
     const orgMsgCount = await getOrgAppealMessageCount(companyId);
-    if (orgMsgCount < 3 && !body.force) {
+    if (!auth.isAdmin && orgMsgCount < 3 && !body.force) {
       const profileRes = await docClient
         .send(
           new GetCommand({
@@ -390,7 +400,7 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
           ":dbu": callerId,
           ":u": timestamp,
           ":gsiPk": "PROFILE",
-          ":gsiSk": "ROLE#EMPRESA#STATUS#SUSPENDIDA",
+          ":gsiSk": "ROLE#ORGANIZACION#STATUS#SUSPENDIDA",
         },
       }),
     );
@@ -468,6 +478,15 @@ export const confirmSuspension: APIGatewayProxyHandler = async (event) => {
 
     // 6. Broadcast WS de resolución
     await broadcastAppealResolved(companyId, "SUSPENDED", event);
+
+    // 7. Sincronizar atómicamente incidencias abiertas de la organización a estado BLOQUEADO
+    await syncCompanyIncidents(
+      companyId,
+      "BLOQUEADO",
+      `Suspensión definitiva confirmada para la organización: ${reason}`,
+      callerRole,
+      callerId,
+    );
 
     return {
       statusCode: 200,
@@ -571,7 +590,7 @@ export const handleSuspensionExpiry = async (event: any) => {
                 ":ss": "SUSPENDED_BY_TTL",
                 ":u": timestamp,
                 ":gsiPk": "PROFILE",
-                ":gsiSk": "ROLE#EMPRESA#STATUS#SUSPENDIDA",
+                ":gsiSk": "ROLE#ORGANIZACION#STATUS#SUSPENDIDA",
               },
             }),
           );
@@ -644,6 +663,13 @@ export const handleSuspensionExpiry = async (event: any) => {
               "Periodo de gracia concluyó sin resolución/apelación favorable. Cuenta suspendida automáticamente.",
             executorId: "SISTEMA_DYNAMODB_TTL",
           });
+
+          await syncCompanyIncidents(
+            companyId,
+            "BLOQUEADO",
+            "Suspensión definitiva automática por expiración de periodo de gracia TTL.",
+            "SISTEMA_DYNAMODB_TTL",
+          );
         }
       } else if (pk.startsWith("VACANCY_SUSPENSION#") && sk === "GRACE_PERIOD") {
         const jobId = oldImage.jobId?.S;

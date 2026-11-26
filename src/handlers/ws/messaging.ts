@@ -1,4 +1,10 @@
-import { PutCommand, GetCommand, QueryCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import {
+  PutCommand,
+  GetCommand,
+  QueryCommand,
+  DeleteCommand,
+  UpdateCommand,
+} from "@aws-sdk/lib-dynamodb";
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
@@ -212,6 +218,199 @@ export const sendMessage = async (event: any) => {
         statusCode: 200,
         body: JSON.stringify({
           message: "Appeal message sent",
+          item: messageItem,
+        }),
+      };
+    }
+
+    // Handle Support Ticket Chat Routing if ticketId or supportTicketId is present
+    const activeTicketId = body.ticketId || body.supportTicketId;
+    if (activeTicketId) {
+      if (!text && !attachmentUrl && (!body.attachments || body.attachments.length === 0)) {
+        return {
+          statusCode: 400,
+          body: "Missing text or attachments parameter for support message",
+        };
+      }
+
+      const ticketRes = await docClient.send(
+        new GetCommand({
+          TableName: tableName,
+          Key: { PK: `SUPPORT#${activeTicketId}`, SK: "METADATA" },
+        }),
+      );
+
+      if (!ticketRes.Item) {
+        return { statusCode: 404, body: "Support ticket not found" };
+      }
+
+      const ticket = ticketRes.Item;
+      const timestamp = new Date().toISOString();
+      const messageId = clientMessageId || `msg-${Date.now()}`;
+
+      const userRole = (event.requestContext?.authorizer?.role || "").toUpperCase();
+      const isMod = userRole === "MODERATOR" || userRole === "MODERADOR" || userRole === "ADMIN";
+
+      // Concurrency lock: moderator cannot reply if ticket is assigned to a different moderator
+      if (
+        isMod &&
+        ticket.assignedModeratorId &&
+        ticket.assignedModeratorId !== senderId &&
+        userRole !== "ADMIN"
+      ) {
+        return {
+          statusCode: 403,
+          body: JSON.stringify({
+            error: `Ticket bloqueado: asignado a ${ticket.assignedModeratorName || "otro moderador"}.`,
+          }),
+        };
+      }
+
+      // Auto-assign to replying moderator if unassigned
+      if (isMod && !ticket.assignedModeratorId) {
+        ticket.assignedModeratorId = senderId;
+        ticket.assignedModeratorName = body.senderName || "Moderador";
+        ticket.status = "EN_ATENCION";
+        await docClient.send(
+          new UpdateCommand({
+            TableName: tableName,
+            Key: { PK: `SUPPORT#${activeTicketId}`, SK: "METADATA" },
+            UpdateExpression:
+              "SET assignedModeratorId = :mid, assignedModeratorName = :mname, #st = :status, GSI1SK = :gsiSk, updatedAt = :u",
+            ExpressionAttributeNames: { "#st": "status" },
+            ExpressionAttributeValues: {
+              ":mid": senderId,
+              ":mname": ticket.assignedModeratorName,
+              ":status": "EN_ATENCION",
+              ":gsiSk": `STATUS#EN_ATENCION#DATE#${timestamp}`,
+              ":u": timestamp,
+            },
+          }),
+        );
+      }
+
+      const messageItem: any = {
+        PK: `SUPPORT#${activeTicketId}`,
+        SK: `MSG#${timestamp}#${messageId}`,
+        messageId,
+        ticketId: activeTicketId,
+        senderId,
+        senderName:
+          body.senderName ||
+          (isMod ? ticket.assignedModeratorName || "Moderador" : ticket.userName),
+        senderRole: isMod ? "MODERATOR" : "USER",
+        text: text || "",
+        message: text || "",
+        attachments:
+          body.attachments ||
+          (attachmentUrl ? [{ url: attachmentUrl, name: attachmentName || "attachment" }] : []),
+        createdAt: timestamp,
+      };
+
+      await docClient.send(
+        new PutCommand({
+          TableName: tableName,
+          Item: messageItem,
+        }),
+      );
+
+      await docClient.send(
+        new UpdateCommand({
+          TableName: tableName,
+          Key: { PK: `SUPPORT#${activeTicketId}`, SK: "METADATA" },
+          UpdateExpression:
+            "SET lastMessage = :lm, lastMessageAt = :lmat, lastSenderRole = :lsr, lastSenderId = :lsid, updatedAt = :u",
+          ExpressionAttributeValues: {
+            ":lm": text || "Archivo adjunto",
+            ":lmat": timestamp,
+            ":lsr": isMod ? "MODERATOR" : "USER",
+            ":lsid": senderId,
+            ":u": timestamp,
+          },
+        }),
+      );
+
+      const targetKeys: string[] = [`USER#${ticket.userId}`, "ROLE#MODERATOR"];
+      if (
+        ticket.assignedModeratorId &&
+        !targetKeys.includes(`USER#${ticket.assignedModeratorId}`)
+      ) {
+        targetKeys.push(`USER#${ticket.assignedModeratorId}`);
+      }
+
+      try {
+        const userProfile = await docClient.send(
+          new GetCommand({
+            TableName: tableName,
+            Key: { PK: `USER#${ticket.userId}`, SK: "PROFILE" },
+          }),
+        );
+        const ownerSub = userProfile.Item?.sub || userProfile.Item?.cognitoSub;
+        if (ownerSub && ownerSub !== ticket.userId && !targetKeys.includes(`USER#${ownerSub}`)) {
+          targetKeys.push(`USER#${ownerSub}`);
+        }
+      } catch {
+        // Non-critical
+      }
+
+      const apigwClient = new ApiGatewayManagementApiClient({
+        endpoint: getEndpoint(event),
+      });
+
+      const recipientPromises: Promise<void>[] = [];
+      const payloadBuf = Buffer.from(
+        JSON.stringify({
+          type: "SUPPORT_TICKET_MESSAGE",
+          action: "receiveSupportMessage",
+          ticketId: activeTicketId,
+          message: messageItem,
+          assignedModeratorId: ticket.assignedModeratorId || null,
+          assignedModeratorName: ticket.assignedModeratorName || null,
+          status: ticket.status || "EN_ATENCION",
+        }),
+      );
+
+      for (const pkKey of targetKeys) {
+        const connRes = await docClient.send(
+          new QueryCommand({
+            TableName: tableName,
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :skPrefix)",
+            ExpressionAttributeValues: {
+              ":pk": pkKey,
+              ":skPrefix": "WS_CONNECTION#",
+            },
+          }),
+        );
+        for (const cItem of connRes.Items || []) {
+          const cid = cItem.SK.replace("WS_CONNECTION#", "");
+          if (cid === connectionId) continue;
+          recipientPromises.push(
+            apigwClient
+              .send(
+                new PostToConnectionCommand({
+                  ConnectionId: cid,
+                  Data: payloadBuf,
+                }),
+              )
+              .then(() => {})
+              .catch(async (err) => {
+                if (err.name === "GoneException" || err.statusCode === 410) {
+                  await docClient.send(
+                    new DeleteCommand({
+                      TableName: tableName,
+                      Key: { PK: pkKey, SK: `WS_CONNECTION#${cid}` },
+                    }),
+                  );
+                }
+              }),
+          );
+        }
+      }
+      await Promise.all(recipientPromises);
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          message: "Support message sent",
           item: messageItem,
         }),
       };

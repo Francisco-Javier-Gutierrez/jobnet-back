@@ -159,6 +159,35 @@ describe("posts interactions handlers", () => {
       expect(mockDynamoSend).not.toHaveBeenCalled();
     });
 
+    it("should reject comment on post if content is flagged by AI moderation", async () => {
+      const aiMod = await import("../../utils/aiModeration");
+      const spyAi = vi.spyOn(aiMod, "moderateTextWithAi").mockResolvedValueOnce({
+        safe: false,
+        confidence: 0.95,
+        flaggedCategories: ["HARASSMENT"],
+        reason: "El comentario contiene acoso no laboral.",
+      });
+
+      const res = await addCommentPost(
+        {
+          pathParameters: { id: "p-1" },
+          body: JSON.stringify({
+            author: "Hater",
+            content: "Te voy a arruinar profesionalmente y buscarte en tu oficina",
+          }),
+        } as any,
+        {} as any,
+        () => {},
+      );
+
+      expect(res.statusCode).toBe(400);
+      const data = JSON.parse(res.body);
+      expect(data.error).toBe("El comentario contiene acoso no laboral.");
+      expect(data.flaggedCategories).toContain("HARASSMENT");
+      expect(mockDynamoSend).not.toHaveBeenCalled();
+      spyAi.mockRestore();
+    });
+
     it("should return 500 on database error", async () => {
       mockDynamoSend.mockRejectedValueOnce(new Error("Comment error"));
       const res = await addCommentPost(

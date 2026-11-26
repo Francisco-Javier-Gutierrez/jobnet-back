@@ -23,7 +23,7 @@ export const headers = {
   "Access-Control-Allow-Credentials": true,
   "Content-Type": "application/json",
   "Access-Control-Allow-Headers":
-    "Content-Type,Authorization,x-user-id,x-user-role,x-user-email,x-user-type,X-User-Id,X-User-Role,X-User-Email,X-User-Type",
+    "Content-Type,Authorization,x-user-id,x-user-role,x-user-email,x-user-type,x-user-name,X-User-Id,X-User-Role,X-User-Email,X-User-Type,X-User-Name",
   "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
 };
 

@@ -22,8 +22,11 @@ export const getEndpoint = (event: any) => {
   if (isOffline) {
     return "http://localhost:3002";
   }
-  const wsApiId = process.env.WS_API_ID || "lzvcx59zaa";
-  const stage = event?.requestContext?.stage || "prod";
+  const wsApiId = process.env.WS_API_ID || "v9b53l2zr2";
+  let stage = event?.requestContext?.stage || "prod";
+  if (stage === "production" || !stage) {
+    stage = "prod";
+  }
   const domainName = event?.requestContext?.domainName;
   if (domainName && domainName.includes(wsApiId)) {
     return `https://${domainName}/${stage}`;

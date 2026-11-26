@@ -149,11 +149,11 @@ describe("moderator governance handlers", () => {
     it("should resolve endpoint using domainName if it includes wsApiId in moderator common", () => {
       const endpoint = getEndpoint({
         requestContext: {
-          domainName: "lzvcx59zaa.execute-api.us-east-1.amazonaws.com",
+          domainName: "v9b53l2zr2.execute-api.us-east-1.amazonaws.com",
           stage: "dev",
         },
       });
-      expect(endpoint).toBe("https://lzvcx59zaa.execute-api.us-east-1.amazonaws.com/dev");
+      expect(endpoint).toBe("https://v9b53l2zr2.execute-api.us-east-1.amazonaws.com/dev");
     });
 
     it("should return localhost endpoint when IS_OFFLINE is true in moderator common", async () => {
